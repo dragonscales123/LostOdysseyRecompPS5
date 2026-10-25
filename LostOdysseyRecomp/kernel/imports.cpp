@@ -2,6 +2,10 @@
 #include <stdafx.h>
 #include <settings/config.h>
 #include <vector>
+#include <ctime>
+#include <algorithm>
+#include <unordered_map>
+#include <thread>
 #include <mutex>
 #include <map>
 #include <filesystem>
@@ -69,6 +73,106 @@ struct ThreadWaitStateGuard
         }
     }
 };
+
+// LO_PROFILE=1: a host thread samples every guest thread each millisecond
+// (its wait state, or its live guest return address plus three callers when
+// running) and logs, once a second, each busy thread's most frequent stacks.
+// Racy reads of live contexts; diagnostics only.
+void StartGuestSampler();
+
+static std::string SampleGuestStack(const ThreadWaitState& st)
+{
+    const bool running = st.what[0] == 'r';
+    const uint32_t liveLr = st.ctx ? uint32_t(st.ctx->lr) : 0;
+    std::string key = running ? fmt::format("run lr={:#x}", liveLr) : fmt::format("{} lr={:#x}", st.what, st.lr);
+    uint32_t frame = running ? (st.ctx ? st.ctx->r1.u32 : 0) : st.r1;
+    for (int i = 0; i < 3 && frame >= 0x1000 && frame < 0x7C000000; i++)
+    {
+        const uint32_t caller = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(frame));
+        if (caller <= frame || caller >= 0x7C000000) break;
+        const uint32_t ret = *reinterpret_cast<be<uint32_t>*>(g_memory.Translate(caller - 8));
+        if (ret < 0x82000000 || ret >= 0x83400000) break;
+        key += fmt::format(" < {:#x}", ret);
+        frame = caller;
+    }
+    return key;
+}
+
+void StartGuestSampler()
+{
+    static std::once_flag once;
+    std::call_once(once, [] {
+        const char* env = getenv("LO_PROFILE");
+        if (!env || env[0] != '1') return;
+        LOG_NOTICE("profile: sampling guest threads every millisecond");
+        std::thread([] {
+            LOG_NOTICE("profile: sampler running");
+            struct ThreadSamples {
+                uint32_t total = 0, running = 0;
+                std::map<std::string, uint32_t> states;
+                std::unordered_map<uint32_t, uint32_t> lrs;
+                std::unordered_map<std::string, uint32_t> stacks;
+            };
+            std::map<uint32_t, ThreadSamples> samples;
+            auto window = std::chrono::steady_clock::now();
+            auto cpuNow = [] { timespec ts{}; clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts); return double(ts.tv_sec) * 1000.0 + ts.tv_nsec / 1e6; };
+            double cpuStart = cpuNow();
+            uint32_t ticks = 0;
+            LOG_NOTICE("profile: {} hardware threads", std::thread::hardware_concurrency());
+            for (;;)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                ++ticks;
+                {
+                    std::lock_guard lock(g_waitStatesMutex);
+                    for (auto* st : g_waitStates)
+                    {
+                        if (!st->ctx) continue; // host threads have no guest stack
+                        auto& t = samples[st->threadId];
+                        ++t.total;
+                        const bool running = st->what[0] == 'r';
+                        if (running) { ++t.running; ++t.lrs[uint32_t(st->ctx->lr)]; }
+                        ++t.states[running ? "run" : st->what];
+                        ++t.stacks[SampleGuestStack(*st)];
+                    }
+                }
+                const auto now = std::chrono::steady_clock::now();
+                if (now - window < std::chrono::seconds(1)) continue;
+                const double seconds = std::chrono::duration<double>(now - window).count();
+                const double cpu = cpuNow();
+                // Process CPU over wall time: how many cores the title kept busy.
+                LOG_INFO("profile: window ticks={} threads={} cores_busy={:.2f}", ticks, samples.size(), (cpu - cpuStart) / 1000.0 / seconds);
+                cpuStart = cpu;
+                std::vector<std::pair<uint32_t, uint32_t>> busiest;
+                for (auto& [tid, t] : samples) busiest.emplace_back(t.running, tid);
+                std::sort(busiest.begin(), busiest.end(), std::greater<>());
+                if (busiest.size() > 4) busiest.resize(4);
+                auto percent = [](uint32_t count, uint32_t total) { return total ? count * 100 / total : 0; };
+                for (auto& [running, tid] : busiest)
+                {
+                    auto& t = samples[tid];
+                    if (!t.total) continue;
+                    std::string states, lrs, stacks;
+                    for (auto& [what, count] : t.states) states += fmt::format(" {}={}%", what, percent(count, t.total));
+                    std::vector<std::pair<uint32_t, uint32_t>> topLr;
+                    for (auto& [lr, count] : t.lrs) topLr.emplace_back(count, lr);
+                    std::sort(topLr.begin(), topLr.end(), std::greater<>());
+                    if (topLr.size() > 8) topLr.resize(8);
+                    for (auto& [count, lr] : topLr) lrs += fmt::format(" {:#x}:{}%", lr, percent(count, t.total));
+                    std::vector<std::pair<uint32_t, std::string>> top;
+                    for (auto& [key, count] : t.stacks) top.emplace_back(count, key);
+                    std::sort(top.begin(), top.end(), [](auto& a, auto& b) { return a.first > b.first; });
+                    if (top.size() > 3) top.resize(3);
+                    for (auto& [count, key] : top) stacks += fmt::format(" | {}% {}", percent(count, t.total), key);
+                    LOG_INFO("profile tid={:#x} samples={} states:{} lr:{}{}", tid, t.total, states, lrs, stacks);
+                }
+                samples.clear();
+                window = now;
+                ticks = 0;
+            }
+        }).detach();
+    });
+}
 
 static ThreadWaitState& CurrentWaitState()
 {
@@ -529,7 +633,34 @@ static uint32_t ExCreateThread(be<uint32_t>* handle, uint32_t stackSize, be<uint
         LOG_KERNEL("stack={:#x} startup={:#x} start={:#x} ctx={:#x} flags={:#x}", stackSize, xApiThreadStartup, startAddress, startContext, creationFlags);
 
     uint32_t hostThreadId;
+    const auto createStart = std::chrono::steady_clock::now();
     auto hThread = GuestThread::Start(params, &hostThreadId);
+    {
+        // Thread churn: the game starts short-lived threads during loads.
+        // Count them and the creator's cost, logged every 10 s (LO_PROFILE).
+        static const bool profile = [] { const char* e = getenv("LO_PROFILE"); return e && e[0] == '1'; }();
+        if (profile)
+        {
+            static std::mutex statsMutex;
+            static uint32_t created = 0;
+            static double totalUs = 0, maxUs = 0;
+            static std::map<uint32_t, uint32_t> creators;
+            static auto window = createStart;
+            const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - createStart).count();
+            std::lock_guard lock(statsMutex);
+            ++created; totalUs += us; maxUs = std::max(maxUs, us);
+            ++creators[g_ppcContext ? uint32_t(g_ppcContext->lr) : 0];
+            const auto now = std::chrono::steady_clock::now();
+            if (now - window >= std::chrono::seconds(10))
+            {
+                std::string top;
+                for (auto& [lr, count] : creators) top += fmt::format(" {:#x}:{}", lr, count);
+                LOG_INFO("profile threads: created={} create_avg={:.0f}us create_max={:.0f}us start={:#x} creators:{}",
+                    created, totalUs / created, maxUs, startAddress, top);
+                created = 0; totalUs = maxUs = 0; creators.clear(); window = now;
+            }
+        }
+    }
     *handle = GetKernelHandle(hThread);
     if (threadId != nullptr)
         *threadId = hostThreadId;

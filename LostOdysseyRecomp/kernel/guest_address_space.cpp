@@ -53,6 +53,11 @@ const char* FailureApiName(FailureOperation operation)
     case FailureOperation::CreateBacking: return "mmap";
     case FailureOperation::MapView: return "mach_vm_remap";
     case FailureOperation::ProtectNull: return "mprotect";
+#elif LO_PLATFORM_PS5
+    case FailureOperation::ReservePreferred:
+    case FailureOperation::ReserveAny: return "ps5_vrange_reserve";
+    case FailureOperation::CreateBacking: return "ps5_shm_create";
+    case FailureOperation::MapView: return "ps5_shm_map/ps5_vrange_commit";
 #else
     case FailureOperation::ReservePreferred:
     case FailureOperation::ReserveAny:
@@ -121,9 +126,9 @@ void RecordFailure(FailureOperation operation, uint32_t error, int32_t viewIndex
 #endif
 }
 
-// macOS: 16 KiB host pages cannot express the E view's 4 KiB offset; see
-// guest_address_space_macos.cpp.
-#if !LO_PLATFORM_MACOS
+// macOS and the PS5: 16 KiB host pages cannot express the E view's 4 KiB
+// offset; see guest_address_space_macos.cpp and guest_address_space_ps5.cpp.
+#if !LO_PLATFORM_MACOS && !LO_PLATFORM_PS5
 uint8_t* Allocate()
 {
     failure = {};

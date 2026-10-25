@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <limits>
 #include <mutex>
+#include <os/platform.h>
+#include <unistd.h>
+#include <vector>
 #include <cpu/guest_thread.h>
 #include <gpu/guest_writes.h>
 #include <kernel/xam.h>
@@ -364,6 +367,64 @@ void FileSystem::SyncFiles(const std::filesystem::path& directory)
     }
 }
 
+bool FileSystem::IsSymlink(const std::filesystem::path& path)
+{
+#if LO_PLATFORM_PS5
+    char target[1];
+    return ::readlink(path.c_str(), target, sizeof(target)) >= 0;
+#else
+    std::error_code ec;
+    return std::filesystem::is_symlink(path, ec);
+#endif
+}
+
+bool FileSystem::RemoveTree(const std::filesystem::path& path, std::error_code& ec)
+{
+    ec.clear();
+    // A link is removed itself, never followed. stat (not lstat, which the
+    // PS5 refuses) then tells a folder from a file.
+    const bool link = IsSymlink(path);
+    const auto status = link ? std::filesystem::file_status(std::filesystem::file_type::symlink)
+                             : std::filesystem::status(path, ec);
+    if (ec)
+    {
+        if (ec == std::errc::no_such_file_or_directory) { ec.clear(); return true; }
+        return false;
+    }
+    if (std::filesystem::is_directory(status))
+    {
+        std::vector<std::filesystem::path> children;
+        for (std::filesystem::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec))
+            children.push_back(it->path());
+        if (ec) return false;
+        for (const auto& child : children)
+            if (!RemoveTree(child, ec)) return false;
+    }
+    std::filesystem::remove(path, ec);
+    return !ec;
+}
+
+bool FileSystem::ReplaceFile(const std::filesystem::path& temporary, const std::filesystem::path& path,
+                             std::error_code& ec)
+{
+    std::filesystem::rename(temporary, path, ec);
+    if (!ec) return true;
+    const auto first = ec;
+    std::error_code exists;
+    if (!std::filesystem::exists(path, exists)) return false;
+    std::filesystem::remove(path, ec);
+    if (ec)
+    {
+        LOG_WARNING("save: could not replace '{}': rename {} ({}), remove {} ({})", PathUtf8(path),
+                    first.value(), first.message(), ec.value(), ec.message());
+        return false;
+    }
+    std::filesystem::rename(temporary, path, ec);
+    LOG_WARNING("save: rename over '{}' failed ({}: {}); removed it first: {}", PathUtf8(path),
+                first.value(), first.message(), ec ? ec.message() : std::string("replaced"));
+    return !ec;
+}
+
 bool FileSystem::WriteFileDurably(const std::filesystem::path& path, const void* data, size_t size)
 {
     auto temporary = path;
@@ -375,9 +436,11 @@ bool FileSystem::WriteFileDurably(const std::filesystem::path& path, const void*
     written = fclose(file) == 0 && written;
     std::error_code ec;
     if (written)
-        std::filesystem::rename(temporary, path, ec);
+        ReplaceFile(temporary, path, ec);
     if (!written || ec)
     {
+        LOG_WARNING("save: durable write of '{}' failed: {}", PathUtf8(path),
+                    !written ? std::string("write or sync") : ec.message());
         std::filesystem::remove(temporary, ec);
         return false;
     }
@@ -425,8 +488,9 @@ bool FileHandle::PublishSave()
     std::error_code ec;
     if (copied)
     {
-        std::filesystem::rename(temporary, path, ec);
-        copied = !ec;
+        copied = FileSystem::ReplaceFile(temporary, path, ec);
+        if (!copied)
+            LOG_WARNING("save: could not publish '{}': {}", FileSystem::PathUtf8(path), ec.message());
 #ifndef _WIN32
         if (copied)
         {

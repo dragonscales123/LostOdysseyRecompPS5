@@ -35,6 +35,12 @@ if(LO_BUILD_ANDROID_PROBE)
     add_subdirectory(tools/android_probe)
     return()
 endif()
+if(LO_TARGET_PLATFORM STREQUAL "ps5")
+    # The PS5 title build (cmake/LoPs5.cmake): Zen 2 CPU, no C++ module
+    # scanning (the SDK ships no clang-scan-deps), no DLSS/FSR SDKs, and the
+    # title is linked and packaged by PS5_Vulkan's recipe.
+    include(cmake/LoPs5.cmake)
+endif()
 # Sandy Bridge baseline (AVX): lets simde map VMX ops to real SSE4.1/AVX intrinsics
 # instead of scalar fallbacks (which pull in C23 roundeven*). Same as UnleashedRecomp.
 # Guarded to x86 so non-x86 Clang builds do not receive an invalid -march; on

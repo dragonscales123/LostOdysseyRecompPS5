@@ -19,6 +19,20 @@ else()
 endif()
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+if(LO_TARGET_PLATFORM STREQUAL "ps5")
+    # SDL's PS5 backends (tools/patches/sdl-ps5.patch): the console's display
+    # through the linked RADV (Vulkan, VK_KHR_display), scePad, sceAudioOut.
+    # Nothing of a desktop Unix exists on the console.
+    foreach(_lo_sdl_off SDL_X11 SDL_WAYLAND SDL_KMSDRM SDL_OPENGL SDL_OPENGLES SDL_HIDAPI SDL_DBUS SDL_IBUS
+            SDL_PIPEWIRE SDL_PULSEAUDIO SDL_ALSA SDL_JACK SDL_SNDIO SDL_OSS SDL_LIBUDEV SDL_CAMERA SDL_DIALOG
+            SDL_SENSOR SDL_HAPTIC SDL_POWER SDL_TRAY SDL_LIBURING SDL_DLOPEN_NOTES SDL_DISKAUDIO SDL_DUMMYAUDIO
+            SDL_DUMMYVIDEO SDL_OFFSCREEN SDL_VIRTUAL_JOYSTICK SDL_INSTALL)
+        set(${_lo_sdl_off} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    foreach(_lo_sdl_on SDL_VULKAN SDL_GPU SDL_RENDER_GPU SDL_RENDER_VULKAN SDL_UNIX_CONSOLE_BUILD)
+        set(${_lo_sdl_on} ON CACHE BOOL "" FORCE)
+    endforeach()
+endif()
 
 # o1heap's own CMakeLists only builds its tests; wrap the single source file.
 add_library(o1heap STATIC "${CMAKE_CURRENT_SOURCE_DIR}/o1heap/o1heap/o1heap.c")
@@ -37,9 +51,9 @@ if(LO_BUILD_GPU)
         set(PLUME_SDL_VULKAN_ENABLED ON CACHE BOOL "" FORCE)
     endif()
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/plume")
-    if(ANDROID)
+    if(ANDROID OR LO_TARGET_PLATFORM STREQUAL "ps5")
         # The pinned plume CMake option only recognizes desktop Linux. Its SDL
-        # surface path also supports Android without changing the submodule.
+        # surface path also supports Android and the PS5 without changing the submodule.
         target_compile_definitions(plume PUBLIC PLUME_SDL_VULKAN_ENABLED)
         target_link_libraries(plume PUBLIC SDL3::SDL3)
     endif()

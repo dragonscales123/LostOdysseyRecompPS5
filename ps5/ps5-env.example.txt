@@ -1,0 +1,16 @@
+# Lost Odyssey PS5 switches, read at start: KEY=VALUE, one per line.
+# Copy this file to the title folder as ps5-env.txt. Lines starting with #
+# are ignored. docs/PS5.md lists every switch.
+
+# Frame rate, GPU wait and pacing once a second, in the runtime log.
+#LO_FRAME_TIMING=1
+
+# What each game thread is doing, sampled every millisecond (diagnostics).
+#LO_PROFILE=1
+
+# How long a thread waiting for one of the game's locks keeps checking before
+# it sleeps (default 2500; 0 = sleep at once).
+#LO_CS_SPIN=2500
+
+# HDR display probe instead of the game (results in boot.txt, then it quits).
+#LO_PS5_VIDEO_PROBE=1

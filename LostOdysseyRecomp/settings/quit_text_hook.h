@@ -6,6 +6,7 @@
 #include <iterator>
 #include <mutex>
 #include <string_view>
+#include <os/platform.h>
 
 namespace settings::quit_text
 {
@@ -22,10 +23,67 @@ constexpr size_t TextIndex(uint32_t id)
     return std::size(TextIds);
 }
 
+#if LO_PLATFORM_PS5
+// On the PS5 the game returns to the console's home screen, not a desktop.
+constexpr std::u16string_view Ps5Text(uint32_t id, uint32_t language)
+{
+    switch (id)
+    {
+    case LabelId:
+        switch (language)
+        {
+        case 1: return u"Quit to PS5";
+        case 2: return u"PS5に戻る";
+        case 3: return u"Zur PS5 zurückkehren";
+        case 4: return u"Retour à la PS5";
+        case 5: return u"Salir a PS5";
+        case 6: return u"Esci a PS5";
+        case 7: return u"PS5로 종료";
+        case 8: return u"退出至PS5";
+        case 9: return u"退出到PS5";
+        }
+        break;
+    case HelpId:
+        switch (language)
+        {
+        case 1: return u"Quit the game and return to the PS5 dashboard.";
+        case 2: return u"ゲームを終了してPS5ダッシュボードに戻ります。";
+        case 3: return u"Spiel beenden und zum PS5-Dashboard zurückkehren.";
+        case 4: return u"Quitter le jeu et retourner au tableau de bord PS5.";
+        case 5: return u"Salir del juego y volver al panel de PS5.";
+        case 6: return u"Esci dal gioco e torna alla dashboard di PS5.";
+        case 7: return u"게임을 종료하고 PS5 대시보드로 돌아갑니다.";
+        case 8: return u"結束遊戲並返回PS5主畫面。";
+        case 9: return u"退出游戏并返回PS5主界面。";
+        }
+        break;
+    case PromptId:
+        switch (language)
+        {
+        case 1: return u"Quit the game and return to the PS5 dashboard? Unsaved progress will be lost.";
+        case 2: return u"ゲームを終了してPS5ダッシュボードに戻りますか？保存していない進行状況は失われます。";
+        case 3: return u"Spiel beenden und zum PS5-Dashboard zurückkehren? Nicht gespeicherter Fortschritt geht verloren.";
+        case 4: return u"Quitter le jeu et retourner au tableau de bord PS5 ? La progression non sauvegardée sera perdue.";
+        case 5: return u"¿Salir del juego y volver al panel de PS5? Se perderá el progreso no guardado.";
+        case 6: return u"Uscire dal gioco e tornare alla dashboard di PS5? I progressi non salvati andranno persi.";
+        case 7: return u"게임을 종료하고 PS5 대시보드로 돌아갈까요? 저장하지 않은 진행 상황은 사라집니다.";
+        case 8: return u"結束遊戲並返回PS5主畫面嗎？未儲存的進度將會遺失。";
+        case 9: return u"退出游戏并返回PS5主界面吗？未保存的进度将会丢失。";
+        }
+        break;
+    }
+    return {};
+}
+#endif
+
 // The resource language IDs are shared with settings::GameLanguage and the
 // original INT/JPN/DEU/FRA/SPA/ITA/KOR/CHI/SCH resource table.
 constexpr std::u16string_view Text(uint32_t id, uint32_t language)
 {
+#if LO_PLATFORM_PS5
+    if (const auto ps5 = Ps5Text(id, language); !ps5.empty())
+        return ps5;
+#endif
     switch (id)
     {
     case LabelId:

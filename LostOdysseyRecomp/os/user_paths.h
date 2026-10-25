@@ -21,6 +21,12 @@ namespace os::user_paths
         g_executableDirectory = executableDirectory;
 #ifdef _WIN32
         g_usePortableLayout = true;
+#elif LO_PLATFORM_PS5
+        // The title folder (/app0) is writable and what FTP shows, and every
+        // file lives there, but by absolute path: the portable layout's
+        // relative paths need a working directory, and a title cannot count
+        // on one (chdir/getcwd are not a title's to use reliably).
+        g_usePortableLayout = false;
 #elif LO_PLATFORM_ANDROID
         g_usePortableLayout = false;
 #elif LO_PLATFORM_MACOS
@@ -57,7 +63,9 @@ namespace os::user_paths
 
     inline std::filesystem::path ConfigDir(const std::filesystem::path& executableDirectory = {})
     {
-#ifdef _WIN32
+#if LO_PLATFORM_PS5
+        return g_executableDirectory;
+#elif defined(_WIN32)
         return executableDirectory.empty() ? std::filesystem::current_path() : executableDirectory;
 #elif LO_PLATFORM_ANDROID
         return g_executableDirectory / "config";
@@ -71,7 +79,9 @@ namespace os::user_paths
 
     inline std::filesystem::path DataDir(const std::filesystem::path& executableDirectory = {})
     {
-#ifdef _WIN32
+#if LO_PLATFORM_PS5
+        return g_executableDirectory;
+#elif defined(_WIN32)
         return executableDirectory.empty() ? std::filesystem::current_path() : executableDirectory;
 #elif LO_PLATFORM_ANDROID
         return g_executableDirectory;
@@ -87,7 +97,9 @@ namespace os::user_paths
 
     inline std::filesystem::path StateDir(const std::filesystem::path& executableDirectory = {})
     {
-#ifdef _WIN32
+#if LO_PLATFORM_PS5
+        return g_executableDirectory;
+#elif defined(_WIN32)
         return executableDirectory.empty() ? std::filesystem::current_path() : executableDirectory;
 #elif LO_PLATFORM_ANDROID
         return g_executableDirectory / "state";

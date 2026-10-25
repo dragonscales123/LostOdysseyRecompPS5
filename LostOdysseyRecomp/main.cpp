@@ -65,6 +65,9 @@ extern char** environ;
 #if LO_PLATFORM_ANDROID
 #include <SDL3/SDL_system.h>
 #endif
+#if LO_PLATFORM_PS5
+#include <os/ps5_title.h>
+#endif
 
 // Runtime entry: set up guest memory, load default.xex and run its entry point
 // on the first guest thread. Everything else is driven by the game through the
@@ -72,7 +75,11 @@ extern char** environ;
 
 static std::filesystem::path ExecutableDirectory()
 {
-#if LO_PLATFORM_ANDROID
+#if LO_PLATFORM_PS5
+    // The title's folder (/data/homebrew/<TITLE_ID>/), writable and reachable
+    // over FTP: settings, saves, logs, caches and the game data live there.
+    return os::ps5::TitleDirectory();
+#elif LO_PLATFORM_ANDROID
     // app_process is the executable on Android. SDL supplies the app-owned
     // writable directory, independent of the APK/native library installation.
     const char* path = SDL_GetAndroidInternalStoragePath();
@@ -207,9 +214,15 @@ static int RunGuest(uint32_t entry)
     discord_rpc::SetEnabled(settings::GetConfig().discordStatus);
     discord_rpc::Initialize([](const char* message) { LOG_NOTICE("discord: {}", message); });
 
+#if LO_PLATFORM_PS5
+    os::ps5::Breadcrumb("main: starting the game");
+#endif
     LOG_INFO("starting guest at {:#x}", entry);
     os::SetCurrentThreadName("Guest Main");
     os::scheduling::PreferPerformanceCores(true);
+#if LO_PLATFORM_PS5
+    os::ps5::PlaceGuestMainThread();
+#endif
     GuestThread::Start({ entry, 0, 0 });
 
     LOG_INFO("guest main thread returned");
@@ -225,13 +238,23 @@ static int RunGuest(uint32_t entry)
     (discord_rpc::Shutdown(), std::_Exit(EXIT_SUCCESS));
 }
 
+void StartGuestSampler();
+#if LO_PLATFORM_PS5
+extern "C" uint64_t sceKernelGetTscFrequency(void);
+#endif
+
 #if LO_PLATFORM_ANDROID
 extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char* argv[])
 #else
 int main(int argc, char* argv[])
 #endif
 {
-#if LO_PLATFORM_POSIX && !LO_PLATFORM_ANDROID
+#if LO_PLATFORM_PS5
+    // klog for stderr, IEEE floating point (a title starts with FTZ/DAZ on),
+    // the working directory and the linked Vulkan driver: os/ps5_title.cpp.
+    os::ps5::InitializeTitle();
+#endif
+#if LO_PLATFORM_POSIX && !LO_PLATFORM_ANDROID && !LO_PLATFORM_PS5
     // Park a restart child before even the updater's startup cleanup runs.
     if (settings::restart::WaitForParentIfRestartChild(argc, argv) == settings::restart::ChildHandshake::Invalid)
         return 1;
@@ -308,6 +331,9 @@ int main(int argc, char* argv[])
 #endif
         }
     }
+#if LO_PLATFORM_PS5
+    os::ps5::Breadcrumb("main: arguments read");
+#endif
     const auto executableDirectory = ExecutableDirectory();
 #if LO_PLATFORM_ANDROID
     if (executableDirectory.empty()) return 1;
@@ -325,6 +351,9 @@ int main(int argc, char* argv[])
         std::freopen((stderrDir / "native-stderr.log").c_str(), "w", stderr);
         std::setvbuf(stderr, nullptr, _IONBF, 0);
     }
+#endif
+#if LO_PLATFORM_PS5
+    os::ps5::Breadcrumb("main: paths");
 #endif
     os::user_paths::Initialize(executableDirectory);
 #if !LO_PLATFORM_ANDROID
@@ -373,10 +402,16 @@ int main(int argc, char* argv[])
         std::filesystem::create_directories(os::user_paths::ConfigDir(), ec);
         std::filesystem::current_path(os::user_paths::ConfigDir(), ec);
     }
+#if LO_PLATFORM_PS5
+    os::ps5::Breadcrumb("main: working directory set");
+#endif
     // Info and kernel lines only with the Debug log setting.
     os::logger::SetDebugLog(updater::ReadStartupPreferences(os::user_paths::SettingsPath()).debugLog);
     // Keep each run separately, including launches without a terminal. Tests
     // can select a path or disable the duplicate sink with LO_LOG_FILE=0.
+#if LO_PLATFORM_PS5
+    os::ps5::Breadcrumb("main: startup preferences read");
+#endif
     std::filesystem::path sessionLog; // default runtime-<digits>.log, for log collection
     const char* logOverride = getenv("LO_LOG_FILE");
     if (!logOverride || strcmp(logOverride, "0") != 0)
@@ -403,6 +438,9 @@ int main(int argc, char* argv[])
         }
         else LOG_WARNING("could not open log file: {}", FileSystem::PathUtf8(logPath));
     }
+#if LO_PLATFORM_PS5
+    os::ps5::Breadcrumb("main: log file handled");
+#endif
     if (compactGameData)
         return CompactGameDataCommand(FindGameRoot(executableDirectory, explicitGamePath).root);
     InstallCrashHandler();
@@ -445,6 +483,10 @@ int main(int argc, char* argv[])
                 switches += fmt::format(" {}", *e);
         LOG_NOTICE("LO_* switches:{}", switches.empty() ? " (none)" : switches.c_str());
     }
+    StartGuestSampler();
+#if LO_PLATFORM_PS5
+    LOG_NOTICE("guest clock: TSC {} Hz", sceKernelGetTscFrequency());
+#endif
     os::diagnostics::LogStartupEnvironment();
 #ifdef _WIN32
     PreferSystemDxgiOnVulkan(executableDirectory);
@@ -593,6 +635,9 @@ int main(int argc, char* argv[])
             return 1;
     }
     settings::ConfigureGameLanguages(gameRoot / "default.xex");
+#if LO_PLATFORM_PS5
+    os::ps5::Breadcrumb("main: game data found, settings next");
+#endif
     os::log_collection::Initialize();
     // The setup window opens only on request (--setup, --setup-only). A first
     // launch starts with the defaults, which the in-game Settings change, and
@@ -602,10 +647,16 @@ int main(int argc, char* argv[])
     if(requestedSetup && !settings::FirstRunSetup(&gameRoot)) return 0;
     if(firstLaunch && !requestedSetup && !settings::SaveConfig(settings::GetConfig()))
         LOG_WARNING("settings: the default settings could not be written");
+#if !LO_PLATFORM_PS5
+    // Log collection uploads over the network, which the PS5 build lacks
+    // (updater/ps5_http.cpp); its logs are copied off over FTP instead.
     if(requestedSetup || firstLaunch)
         os::log_collection::PromptFirstRun(settings::GetConfig().uiLanguage);
+#endif
     if(setupOnly) return 0;
+#if !LO_PLATFORM_PS5
     os::log_collection::StartUpload(sessionLog);
+#endif
     {
         const auto& c = settings::GetConfig();
         LOG_NOTICE("settings: backend={} output={}x{} window={} render_resolution={} aa={} upscaler={} dlss_quality={} dlss_model={} "
@@ -678,6 +729,9 @@ int main(int argc, char* argv[])
     FileSystem::Init(gameRoot);
     XamInit();
 
+#if LO_PLATFORM_PS5
+    os::ps5::Breadcrumb("main: loading default.xex");
+#endif
     uint32_t entry = XexLoader::Load(gameRoot / "default.xex");
     if (entry == 0)
         return 1;

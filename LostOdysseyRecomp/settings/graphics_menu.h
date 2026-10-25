@@ -1,6 +1,7 @@
 #pragma once
 #include "config.h"
 #include "menu.h"
+#include <gpu/frame_rate.h>
 #include <os/platform.h>
 #include <algorithm>
 #include <iterator>
@@ -21,6 +22,9 @@ inline bool HdrAvailable(GraphicsBackend backend)
 // macOS offers MetalFX Temporal; Android has no NGX and builds FSR optionally.
 #if LO_PLATFORM_MACOS
 inline constexpr uint32_t AaChoiceCount = 5;
+#elif LO_PLATFORM_PS5
+// Off, FXAA, SMAA, TAA: the PS5 build has no DLSS, FSR or XeSS.
+inline constexpr uint32_t AaChoiceCount = 4;
 #elif LO_PLATFORM_ANDROID
 #if defined(LO_HAS_FSR) && LO_HAS_FSR
 inline constexpr bool AndroidFsrAvailable = true;
@@ -40,6 +44,8 @@ inline uint32_t AaChoice(const Config& config)
 #if LO_PLATFORM_MACOS
     // A DLSS/FSR value from another platform's settings shows the AA it falls back to.
     if (config.upscaler == Upscaler::MetalFx) return 4;
+#elif LO_PLATFORM_PS5
+    // No upscaler: a saved desktop request shows the AA it falls back to.
 #elif LO_PLATFORM_ANDROID
     // NGX is unavailable here; a saved desktop request shows the AA fallback.
     if (AndroidFsrAvailable && config.upscaler == Upscaler::Fsr) return 4;
@@ -69,6 +75,18 @@ inline void SelectAa(Config& config, uint32_t choice)
         // Retain legacy AA as the renderer's unsupported-scene fallback.
         // The existing frame plan selects one temporal consumer, not both.
     }
+}
+// Frame rate choices: the first FrameRateChoiceCount of gpu::frame_rate::kNativeRates.
+// The PS5 shows 90 and 120 only while its display runs at 119.88 Hz: the
+// title declares high frame rate (sce_sys/param.json attribute3 0x40) and the
+// TV takes it; otherwise the output is 59.94 Hz.
+inline uint32_t FrameRateChoiceCount([[maybe_unused]] float displayHz)
+{
+#if LO_PLATFORM_PS5
+    return displayHz >= 100.0f ? gpu::frame_rate::kCount : 2;
+#else
+    return gpu::frame_rate::kCount;
+#endif
 }
 // Render resolution choices, in menu order (Config::internalResolution values).
 #if LO_PLATFORM_MACOS

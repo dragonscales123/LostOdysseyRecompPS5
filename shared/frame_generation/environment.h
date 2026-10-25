@@ -54,8 +54,8 @@ inline EnvironmentSelection ParseEnvironment(const char* provider, const char* m
         errno = 0;
         out.config.targetFrameRate = strtof_l(target, &end, LC_C_LOCALE);
         const bool parsed = errno == 0 && end != target && end == text.data()+text.size();
-#elif defined(__ANDROID__)
-        // NDK libc++ does not provide floating-point from_chars. Use an
+#elif defined(__ANDROID__) || defined(__PROSPERO__)
+        // NDK libc++ (and the PS5 SDK's libc++ 18) does not provide floating-point from_chars. Use an
         // explicit C++ classic locale, without accepting leading whitespace.
         std::istringstream input{std::string(text)};
         input.imbue(std::locale::classic());

@@ -8,14 +8,25 @@
 #define LO_PLATFORM_WINDOWS 1
 #define LO_PLATFORM_LINUX 0
 #define LO_PLATFORM_MACOS 0
+#define LO_PLATFORM_PS5 0
+#elif defined(__PROSPERO__)
+// PlayStation 5 homebrew built with the PS5 payload SDK (FreeBSD-based libc,
+// static title, no window system; see docs/PS5.md). Tested before __linux__,
+// which the SDK does not define either.
+#define LO_PLATFORM_WINDOWS 0
+#define LO_PLATFORM_LINUX 0
+#define LO_PLATFORM_MACOS 0
+#define LO_PLATFORM_PS5 1
 #elif defined(__linux__)
 #define LO_PLATFORM_WINDOWS 0
 #define LO_PLATFORM_LINUX 1
 #define LO_PLATFORM_MACOS 0
+#define LO_PLATFORM_PS5 0
 #elif defined(__APPLE__)
 #define LO_PLATFORM_WINDOWS 0
 #define LO_PLATFORM_LINUX 0
 #define LO_PLATFORM_MACOS 1
+#define LO_PLATFORM_PS5 0
 #else
 #error "Unsupported host platform"
 #endif
@@ -28,4 +39,7 @@
 
 // Android also uses the Linux/POSIX memory and scheduling implementations.
 // Desktop-only process, updater and storage paths test Android separately.
-#define LO_PLATFORM_POSIX (LO_PLATFORM_LINUX || LO_PLATFORM_MACOS)
+// The PS5 uses the POSIX paths where its libc has them; code that needs what
+// the console lacks (processes, getcwd, a window system, dlopen) tests
+// LO_PLATFORM_PS5 separately.
+#define LO_PLATFORM_POSIX (LO_PLATFORM_LINUX || LO_PLATFORM_MACOS || LO_PLATFORM_PS5)

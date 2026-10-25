@@ -50,6 +50,17 @@ struct FileSystem
     static void SyncFiles(const std::filesystem::path& directory);
     // Write to a sibling temporary file, sync it, then replace the target.
     static bool WriteFileDurably(const std::filesystem::path& path, const void* data, size_t size);
+    // Removes a directory tree one entry at a time by path (unlink/rmdir),
+    // without libc++'s descriptor-relative remove_all, which the PS5's libc
+    // only emulates. True when nothing is left.
+    // Whether path is a symbolic link. The PS5 refuses lstat to a title
+    // (EPERM), so there it asks readlink, which fails on anything else.
+    static bool IsSymlink(const std::filesystem::path& path);
+    static bool RemoveTree(const std::filesystem::path& path, std::error_code& ec);
+    // rename(temporary, path), replacing path. Where a filesystem refuses to
+    // rename over an existing file, removes it and renames again.
+    static bool ReplaceFile(const std::filesystem::path& temporary, const std::filesystem::path& path,
+                            std::error_code& ec);
 };
 
 std::filesystem::path GetGamePath();

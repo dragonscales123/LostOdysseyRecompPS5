@@ -138,6 +138,18 @@ Config Validate(Config value)
     // Metal always keeps display sync; the menu offers only ProMotion there.
     value.vsync = true;
 #endif
+#if LO_PLATFORM_PS5
+    // What the console can run, whatever another platform's settings file
+    // says (the menu hides the rest, settings/menu.cpp GraphicsRowHidden):
+    // one full-screen display presenting with vsync (HDR10 where the
+    // console's output is in HDR), and no upscaler or frame generation here.
+    value.windowMode = WindowMode::Borderless;
+    value.vsync = true;
+    value.variableRefreshRate = false;
+    value.upscaler = gpu::upscaling::Upscaler::Off;
+    value.frameGenerationProvider = framegen::Provider::Off;
+    value.dlssNeuralRendering = 0;
+#endif
     return value;
 }
 Config Read()

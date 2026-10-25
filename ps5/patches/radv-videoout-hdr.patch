@@ -1,0 +1,213 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -79,7 +79,31 @@
+  * declare 0x40 with 0x40000. VideoOut itself grants mode 15 or refuses it. */
+ #define VIDEOOUT_ATTRIBUTE3_HIGH_FRAME_RATE 0x40u
+ 
++/* The 10-bit BT.2100 PQ display formats (HDR10): class 0x81, the 10-bit
++ * layout, with 0x04 0x07 in bytes 4 and 5, as titles' own display buffers
++ * carry them (AnyPS5 PR #5697); 0x22 in byte 3 puts red in the low bits, as
++ * for the 8-bit formats. Registration took both on a console set to HDR "On
++ * when supported", which keeps its output in HDR10 and shows PQ buffers as
++ * such (LostOdysseyRecomp ps5_video_probe.cpp, 2026-10-25). */
++#define PS5_VIDEO_OUT_PIXEL_FORMAT_A2B10G10R10_PQ UINT64_C(0x8100070422000000)
++#define PS5_VIDEO_OUT_PIXEL_FORMAT_A2R10G10B10_PQ UINT64_C(0x8100070400000000)
++/* sceVideoOutGetOutputStatus: byte 4 is the dynamic range (2: HDR) and bit 0
++ * of byte 8 says HDR output is available (AnyPS5 PR #5697, after
++ * SharpProspero; a console in HDR read 02 00 00 00 02 00 00 00 03). */
++#define PS5_VIDEO_OUT_DYNAMIC_RANGE_HDR 2
++#define PS5_VIDEO_OUT_STATUS_FLAG_HDR 0x1
++
++#if defined(__PROSPERO__)
++int sceVideoOutGetOutputStatus(int32_t handle, void *status, size_t size);
++#endif
++
+ #if !defined(__PROSPERO__)
++static int
++sceVideoOutGetOutputStatus(int32_t handle, void *status, size_t size)
++{
++   return -1;
++}
++
+ /* The host model: flips show at once and a vblank comes every millisecond,
+  * enough for the host builds to run the swapchain's logic. */
+ #define PS5_VIDEO_OUT_USER_SYSTEM 0xff
+@@ -255,12 +279,18 @@
+    bool high_frame_rate;
+    bool modes_settled;
+    bool high_mode_offered;
++   /* The output was in HDR, and PQ formats are offered (settled with the
++    * modes). PS5_VIDEOOUT_HDR=0 turns them off. */
++   bool hdr_offered;
+    /* A set of buffers for each size a swapchain has used, in the order they
+     * were registered; set i's buffers are indices i * VIDEOOUT_BUFFERS on. */
+    struct wsi_videoout_set {
+       const struct wsi_videoout_size *size;
++      /* The VideoOut pixel format the buffers were registered with: SDR, or
++       * one of the PQ formats for an HDR10 swapchain. */
++      uint64_t pixel_format;
+       uint8_t *buffers;
+-   } sets[VIDEOOUT_SIZES];
++   } sets[VIDEOOUT_SIZES * 2];
+    uint32_t set_count;
+    /* The argument of the latest flip submitted; each flip's is one more. */
+    int64_t flip_argument;
+@@ -271,7 +301,7 @@
+       bool held;
+       /* Presented, its flip waiting for the frame. */
+       bool pending;
+-   } buffer[VIDEOOUT_BUFFERS * VIDEOOUT_SIZES];
++   } buffer[VIDEOOUT_BUFFERS * VIDEOOUT_SIZES * 2];
+    /* The swapchain presenting now; older ones are retired. */
+    struct wsi_videoout_swapchain *current;
+ 
+@@ -440,6 +470,14 @@
+    if (!videoout_output.modes_settled) {
+       videoout_output.modes_settled = true;
+       videoout_output.high_mode_offered = videoout_open_locked() && videoout_output.high_frame_rate;
++      const char *hdr = getenv("PS5_VIDEOOUT_HDR");
++      uint8_t status[64] = {0};
++      if (videoout_output.handle >= 0 && !(hdr && hdr[0] == '0') &&
++          sceVideoOutGetOutputStatus(videoout_output.handle, status, sizeof(status)) == 0)
++         videoout_output.hdr_offered = status[4] == PS5_VIDEO_OUT_DYNAMIC_RANGE_HDR &&
++                                       (status[8] & PS5_VIDEO_OUT_STATUS_FLAG_HDR);
++      fprintf(stderr, "wsi/videoout: output dynamic range %u flags 0x%02x: HDR10 swapchains %s\n", status[4],
++              status[8], videoout_output.hdr_offered ? "offered" : "not offered");
+    }
+    mtx_unlock(&videoout_output.lock);
+ }
+@@ -447,17 +485,20 @@
+ /* The set of buffers of a size, cleared and registered the first time a
+  * swapchain of that size is made, and kept. Under lock. */
+ static VkResult
+-videoout_register_locked(const struct wsi_videoout_size *size, const struct wsi_videoout_set **set_out)
++videoout_register_locked(const struct wsi_videoout_size *size, uint64_t pixel_format,
++                         const struct wsi_videoout_set **set_out)
+ {
+    struct wsi_videoout_output *out = &videoout_output;
+    for (uint32_t i = 0; i < out->set_count; i++) {
+-      if (out->sets[i].size == size) {
++      if (out->sets[i].size == size && out->sets[i].pixel_format == pixel_format) {
+          *set_out = &out->sets[i];
+          return VK_SUCCESS;
+       }
+    }
+    if (!videoout_open_locked())
+       return VK_ERROR_INITIALIZATION_FAILED;
++   if (out->set_count == ARRAY_SIZE(out->sets))
++      return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+ 
+    const uint32_t index = out->set_count;
+    const size_t bytes = VIDEOOUT_BUFFERS * size->buffer_bytes;
+@@ -492,8 +533,8 @@
+    for (uint32_t i = 0; i < VIDEOOUT_BUFFERS; i++)
+       registered[i] = (struct ps5_video_out_buffer){.data = buffers + i * size->buffer_bytes};
+    uint8_t attribute[PS5_VIDEO_OUT_ATTRIBUTE_BYTES] = {0};
+-   sceVideoOutSetBufferAttribute2(attribute, PS5_VIDEO_OUT_PIXEL_FORMAT_B8G8R8A8_SDR,
+-                                  PS5_VIDEO_OUT_TILING_64KB_R_X, size->extent.width, size->extent.height, 0, 0, 0);
++   sceVideoOutSetBufferAttribute2(attribute, pixel_format, PS5_VIDEO_OUT_TILING_64KB_R_X, size->extent.width,
++                                  size->extent.height, 0, 0, 0);
+    if (result == 0)
+       result = sceVideoOutRegisterBuffers2(out->handle, (int32_t)index, (int32_t)(index * VIDEOOUT_BUFFERS),
+                                            registered, VIDEOOUT_BUFFERS, attribute, 0, NULL);
+@@ -503,9 +544,10 @@
+       /* The memory stays: VideoOut may hold a buffer it was given. */
+       return VK_ERROR_INITIALIZATION_FAILED;
+    }
+-   fprintf(stderr, "wsi/videoout: %ux%u framebuffers registered as set %u, buffers %u-%u\n", size->extent.width,
+-           size->extent.height, index, index * VIDEOOUT_BUFFERS, index * VIDEOOUT_BUFFERS + VIDEOOUT_BUFFERS - 1);
+-   out->sets[index] = (struct wsi_videoout_set){.size = size, .buffers = buffers};
++   fprintf(stderr, "wsi/videoout: %ux%u framebuffers registered as set %u, buffers %u-%u, format 0x%016" PRIx64 "\n",
++           size->extent.width, size->extent.height, index, index * VIDEOOUT_BUFFERS,
++           index * VIDEOOUT_BUFFERS + VIDEOOUT_BUFFERS - 1, pixel_format);
++   out->sets[index] = (struct wsi_videoout_set){.size = size, .pixel_format = pixel_format, .buffers = buffers};
+    out->set_count = index + 1;
+    *set_out = &out->sets[index];
+    return VK_SUCCESS;
+@@ -835,22 +877,47 @@
+    return VK_SUCCESS;
+ }
+ 
+-static const VkFormat videoout_formats[] = {
+-   VK_FORMAT_B8G8R8A8_UNORM,
+-   VK_FORMAT_B8G8R8A8_SRGB,
++static const VkSurfaceFormatKHR videoout_formats[] = {
++   {VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
++   {VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
++   /* Offered while the output is in HDR (videoout_settle_modes). */
++   {VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT},
++   {VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT},
+ };
+ 
++static uint32_t
++videoout_format_count(void)
++{
++   videoout_settle_modes();
++   return videoout_output.hdr_offered ? ARRAY_SIZE(videoout_formats) : 2;
++}
++
++/* The VideoOut pixel format for a swapchain's format and colour space; 0 for
++ * one the surface does not offer. */
++static uint64_t
++videoout_pixel_format(VkFormat format, VkColorSpaceKHR color_space)
++{
++   if (color_space == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR &&
++       (format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB))
++      return PS5_VIDEO_OUT_PIXEL_FORMAT_B8G8R8A8_SDR;
++   if (color_space == VK_COLOR_SPACE_HDR10_ST2084_EXT && videoout_output.hdr_offered) {
++      if (format == VK_FORMAT_A2B10G10R10_UNORM_PACK32)
++         return PS5_VIDEO_OUT_PIXEL_FORMAT_A2B10G10R10_PQ;
++      if (format == VK_FORMAT_A2R10G10B10_UNORM_PACK32)
++         return PS5_VIDEO_OUT_PIXEL_FORMAT_A2R10G10B10_PQ;
++   }
++   return 0;
++}
++
+ static VkResult
+ videoout_surface_get_formats(VkIcdSurfaceBase *surface, struct wsi_device *wsi_device, uint32_t *pSurfaceFormatCount,
+                              VkSurfaceFormatKHR *pSurfaceFormats)
+ {
+    VK_OUTARRAY_MAKE_TYPED(VkSurfaceFormatKHR, out, pSurfaceFormats, pSurfaceFormatCount);
+-   for (unsigned i = 0; i < ARRAY_SIZE(videoout_formats); i++) {
++   const uint32_t count = videoout_format_count();
++   for (unsigned i = 0; i < count; i++) {
+       vk_outarray_append_typed(VkSurfaceFormatKHR, &out, f)
+-      {
+-         f->format = videoout_formats[i];
+-         f->colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+-      }
++         *f = videoout_formats[i];
+    }
+    return vk_outarray_status(&out);
+ }
+@@ -860,12 +927,12 @@
+                               uint32_t *pSurfaceFormatCount, VkSurfaceFormat2KHR *pSurfaceFormats)
+ {
+    VK_OUTARRAY_MAKE_TYPED(VkSurfaceFormat2KHR, out, pSurfaceFormats, pSurfaceFormatCount);
+-   for (unsigned i = 0; i < ARRAY_SIZE(videoout_formats); i++) {
++   const uint32_t count = videoout_format_count();
++   for (unsigned i = 0; i < count; i++) {
+       vk_outarray_append_typed(VkSurfaceFormat2KHR, &out, f)
+       {
+          assert(f->sType == VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR);
+-         f->surfaceFormat.format = videoout_formats[i];
+-         f->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
++         f->surfaceFormat = videoout_formats[i];
+       }
+    }
+    return vk_outarray_status(&out);
+@@ -1147,9 +1214,13 @@
+    if (mode->high_frame_rate && !out->high_mode_offered)
+       return VK_ERROR_INITIALIZATION_FAILED;
+ 
++   const uint64_t pixel_format = videoout_pixel_format(pCreateInfo->imageFormat, pCreateInfo->imageColorSpace);
++   if (pixel_format == 0)
++      return VK_ERROR_FORMAT_NOT_SUPPORTED;
++
+    const struct wsi_videoout_set *set = NULL;
+    mtx_lock(&out->lock);
+-   VkResult result = videoout_register_locked(mode->size, &set);
++   VkResult result = videoout_register_locked(mode->size, pixel_format, &set);
+    if (result == VK_SUCCESS && out->current && out->current != (struct wsi_videoout_swapchain *)
+                                                  wsi_swapchain_from_handle(pCreateInfo->oldSwapchain))
+       result = VK_ERROR_NATIVE_WINDOW_IN_USE_KHR;

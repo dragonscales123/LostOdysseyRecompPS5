@@ -1,6 +1,9 @@
 #include "dxc_compiler.h"
 #include <os/platform.h>
 #include "cache.h"
+#ifndef LO_PS5_DXC_IDENTITY
+#define LO_PS5_DXC_IDENTITY "dxc-1.8"
+#endif
 #include "binary_cache.h"
 #include "builtin_shader_store.h"
 #include "resource_cpx_index_sha256.h"
@@ -153,6 +156,12 @@ namespace xenos
 #else
         void LoadDxc()
         {
+#if LO_PLATFORM_PS5
+            // No shader compiler on the console: built-in shaders come from the
+            // cache compiled on a PC (docs/PS5.md), guest shaders from the pack.
+            g_loadError = "no shader compiler on PS5 (precompiled shaders only)";
+            return;
+#endif
 #if LO_PLATFORM_MACOS
             constexpr const char* kLibrary = "libdxcompiler.dylib";
 #else
@@ -237,6 +246,11 @@ namespace xenos
     const std::string& DxcIdentity()
     {
         static const std::string identity = []() -> std::string {
+#if LO_PLATFORM_PS5
+            // The compiler the PS5 cache was built with on a PC (the bundled
+            // dxc-bin), so its entries match (docs/PS5.md).
+            if (!DxcAvailable()) return LO_PS5_DXC_IDENTITY;
+#endif
             if (!DxcAvailable()) return {};
             // Compiler version is cache compatibility metadata. Do not reread
             // and hash entire compiler/validator libraries during game startup.
@@ -420,6 +434,23 @@ namespace xenos
             SHADER_LOG_INFO("cache-miss", BuiltinKeyFnv, "builtin key={:016x} profile={} entry={} format={}",
                 hash, profile, entry, spirv ? "spirv" : "dxil");
         result = CompileHlsl(source, entry, profile, format);
+#if LO_PLATFORM_PS5
+        // Keep what the console could not compile, for the PC to compile into
+        // this cache (LoShaderPackTool compile-requests; docs/PS5.md).
+        if (!result.ok && cacheEnabled)
+        {
+            std::error_code error;
+            const auto requests = cacheDir / "requests";
+            std::filesystem::create_directories(requests, error);
+            const auto name = fmt::format("{:016x}-{}-{}-{}.hlsl", hash, entry, profile, spirv ? "spirv" : "dxil");
+            if (!error && !std::filesystem::exists(requests / name, error))
+            {
+                std::ofstream out(requests / name, std::ios::binary);
+                out << source;
+                LOG_WARNING("shader cache: no compiler; saved {} for the PC to compile", name);
+            }
+        }
+#endif
         if (result.ok && store) {
             if (store->Writable()) store->Add(pixel, hash, digest, result.bytecode);
         } else if (result.ok && cacheEnabled) {

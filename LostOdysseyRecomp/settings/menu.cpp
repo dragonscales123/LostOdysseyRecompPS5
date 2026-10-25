@@ -31,6 +31,7 @@
 #if LO_PLATFORM_ANDROID
 #include <SDL3/SDL_system.h>
 #endif
+#include <SDL3/SDL_video.h>
 extern "C" PPC_FUNC(__imp__sub_822F19B0);
 extern "C" PPC_FUNC(__imp__sub_82481BE8);
 extern "C" PPC_FUNC(__imp__sub_82870E38);
@@ -1143,9 +1144,20 @@ std::wstring DlssNotice()
         AppendSentence(text, BackendPendingSentence(running.device.backend));
     return text;
 }
+// The primary display's refresh rate (0 when SDL cannot say).
+float DisplayRefreshHz()
+{
+    const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    return mode ? mode->refresh_rate : 0.0f;
+}
 bool SystemRowHidden(int r)
 {
-#if LO_PLATFORM_ANDROID || defined(__SWITCH__) || defined(__NX__) || !(defined(_WIN32) || defined(__linux__) || defined(__APPLE__))
+#if LO_PLATFORM_PS5
+    // No network on the console (updates, shader bundle download, log upload);
+    // the importer's writes slow to 2 MiB/s after 1.3 GiB, so discs go in by FTP.
+    return r == SystemDiscordStatusRow || r == SystemAddToSteamRow || r == SystemUpdatesRow ||
+           r == SystemCollectionRow || r == SystemImportRow || r == SystemShaderBundleRow;
+#elif LO_PLATFORM_ANDROID || defined(__SWITCH__) || defined(__NX__) || !(defined(_WIN32) || defined(__linux__) || defined(__APPLE__))
     return r == SystemDiscordStatusRow || r == SystemAddToSteamRow;
 #else
     return false;
@@ -1166,6 +1178,18 @@ bool GraphicsRowHidden(int r)
         return true;
     if (r == int(GraphicsRow::DlssQuality) || r == int(GraphicsRow::FsrSharpness))
         return !graphics_menu::AndroidFsrAvailable || edit.upscaler != gpu::upscaling::Upscaler::Fsr;
+#endif
+#if LO_PLATFORM_PS5
+    // One backend, one full-screen display at its own mode (the swapchain takes
+    // the display's size, so Output resolution changed nothing), vsync only
+    // (no immediate present, no VRR), and no NGX, FSR or frame generation in
+    // this build. HDR stays: the VideoOut path offers HDR10 swapchains while
+    // the console's output is in HDR (ps5/patches/radv-videoout-hdr.patch).
+    if (r == int(GraphicsRow::Backend) || r == int(GraphicsRow::DisplayMode) ||
+        r == int(GraphicsRow::OutputResolution) || r == int(GraphicsRow::VariableRefreshRate) ||
+        r == int(GraphicsRow::FrameGeneration) || r == int(GraphicsRow::FrameGenerationMultiplier) ||
+        r == int(GraphicsRow::DlssQuality) || r == int(GraphicsRow::DlssModel) || r == int(GraphicsRow::FsrSharpness))
+        return true;
 #endif
     // A single adapter or display leaves nothing to choose.
     if (r == int(GraphicsRow::Gpu))
@@ -1242,7 +1266,7 @@ void SkipHiddenGraphicsRow()
 }
 void Publish(uint8_t *base, uint32_t config)
 {
-#if LO_PLATFORM_ANDROID
+#if LO_PLATFORM_ANDROID || LO_PLATFORM_PS5
     // The first graphics ids are hidden; enter the tab on a visible row.
     SkipHiddenGraphicsRow();
 #endif
@@ -1561,10 +1585,10 @@ void Publish(uint8_t *base, uint32_t config)
         placeGraphics(GraphicsRow::RgbRange, makeChoices(L"RGB Range", L"RGB 範圍",
                    {Tr(L"Off", L"關"), Tr(L"Expanded", L"擴展")}, edit.expandRgbRange ? 1 : 0));
         std::vector<std::wstring> frameRates;
-        for (const auto fps : gpu::frame_rate::kNativeRates)
-            frameRates.push_back(std::to_wstring(fps) + L" FPS");
-        placeGraphics(GraphicsRow::FrameRate, makeChoices(L"Frame rate", L"影格率",
-                   std::move(frameRates), gpu::frame_rate::MenuIndex(edit.frameRate)));
+        for (uint32_t i = 0; i < graphics_menu::FrameRateChoiceCount(DisplayRefreshHz()); ++i)
+            frameRates.push_back(std::to_wstring(gpu::frame_rate::kNativeRates[i]) + L" FPS");
+        placeGraphics(GraphicsRow::FrameRate, makeChoices(L"Frame rate", L"影格率", std::move(frameRates),
+                   std::min(gpu::frame_rate::MenuIndex(edit.frameRate), graphics_menu::FrameRateChoiceCount(DisplayRefreshHz()) - 1)));
         placeGraphics(GraphicsRow::LoadingTransitions, makeChoices(L"Loading speed", L"載入速度",
                    {Tr(L"Original", L"原版"), Tr(L"Fast", L"快速")}, edit.loadingTransitions == 0 ? 0 : 1));
 #if LO_PLATFORM_MACOS
@@ -1650,6 +1674,8 @@ void Publish(uint8_t *base, uint32_t config)
         addAction(L"Shader bundle", L"著色器包", Tr(L"Download again", L"重新下載"));
         addAction(L"Prepare shaders again", L"重新準備著色器", Tr(L"Prepare again", L"重新準備"));
         addAction(L"Save settings", L"儲存設定", Tr(L"Save", L"儲存"));
+        for (int r = 0; r < int(next.rows.size()); ++r)
+            next.rows[r].hidden = next.rows[r].hidden || SystemRowHidden(r);
     }
     // Keep the focused row inside the visible window. Scroll persists per tab
     // so returning to a long list restores its position.
@@ -3782,8 +3808,8 @@ PPC_FUNC(sub_822F19B0)
                 break;
             case GraphicsRow::FrameRate:
             {
-                const auto index = gpu::frame_rate::MenuIndex(edit.frameRate);
-                edit.frameRate = gpu::frame_rate::FromMenuIndex(cycle(index, gpu::frame_rate::kCount));
+                const auto index = std::min(gpu::frame_rate::MenuIndex(edit.frameRate), graphics_menu::FrameRateChoiceCount(DisplayRefreshHz()) - 1);
+                edit.frameRate = gpu::frame_rate::FromMenuIndex(cycle(index, graphics_menu::FrameRateChoiceCount(DisplayRefreshHz())));
                 break;
             }
             case GraphicsRow::LoadingTransitions:

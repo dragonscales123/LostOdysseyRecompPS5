@@ -1,3 +1,7 @@
+#include <os/platform.h>
+#if LO_PLATFORM_PS5
+#include <os/ps5_title.h>
+#endif
 #include <discord/presence.h>
 #if !defined(LO_VIDEO_SUBMISSION_UNIT)
 #include <version.h>
@@ -1111,8 +1115,12 @@ namespace gpu::video
             const bool active = display.hdrActive || display.hdrTransport;
             auto calibration = settings::GetHdrCalibration();
             const bool relative = display.encoding == plume::RenderOutputEncoding::EDR;
-            const float reportedPeak = relative && active ?
+            float reportedPeak = relative && active ?
                 float(calibration.paperWhiteNits) * display.headroom : display.peakNits;
+#if LO_PLATFORM_PS5
+            // The display output reports no peak; the console's Adjust HDR does.
+            if (!(reportedPeak > 0.0f) && active) reportedPeak = os::ps5::SystemHdrPeakNits();
+#endif
             const uint32_t detected = std::isfinite(reportedPeak) && reportedPeak >= 80.0f && reportedPeak <= 10000.0f ?
                 uint32_t(std::lround(reportedPeak)) : 0u;
             settings::SetHdrDisplayInfo({active, detected, relative});
@@ -1122,6 +1130,17 @@ namespace gpu::video
             g_hdrOutput = hdr::MakeOutput(linear, display.encoding == plume::RenderOutputEncoding::EDR,
                 active, g_hdrPaperWhiteNits, g_hdrPeakNits, display.encoding == plume::RenderOutputEncoding::HDR10_PQ);
             g_presentation->SetOutputTransform(g_hdrOutput);
+            {
+                // Each calibration change that reaches the output, at most
+                // twice a second so a held slider does not flood the log.
+                static float loggedWhite = -1, loggedPeak = -1;
+                static std::chrono::steady_clock::time_point logged;
+                if ((loggedWhite != g_hdrPaperWhiteNits || loggedPeak != g_hdrPeakNits) && now - logged >= std::chrono::milliseconds(500)) {
+                    LOG_INFO("HDR: output transform paper_white={} peak={} automatic={} detected={} active={} pq={} ratio={}",
+                        g_hdrPaperWhiteNits, g_hdrPeakNits, calibration.automatic, detected, g_hdrOutput.active, g_hdrOutput.pq, g_hdrOutput.peakRatio);
+                    loggedWhite = g_hdrPaperWhiteNits; loggedPeak = g_hdrPeakNits; logged = now;
+                }
+            }
             g_hdrSceneEnabled = g_hdrSwapchain && g_hdrOutput.active && HdrConfigurationCompatible();
             renderer::SetHdrSceneEnabled(g_hdrSceneEnabled);
             if (g_hdrSwapchain && g_hdrReportedActive != g_hdrSceneEnabled) {
@@ -3461,7 +3480,7 @@ namespace gpu::video
             return;
         if (settings::restart::Requested()) {
             renderer::WaitDebugCaptureArchive();
-#if defined(_WIN32) || LO_PLATFORM_POSIX
+#if defined(_WIN32) || (LO_PLATFORM_POSIX && !LO_PLATFORM_PS5)
             if (settings::restart::LaunchWaitingChild()) {
                 RequestExit();
                 return;

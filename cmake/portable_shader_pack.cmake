@@ -24,6 +24,11 @@ else()
         SOURCE_SUBDIR build/cmake)
     FetchContent_MakeAvailable(lo_pack_zstd)
     set(LO_PACK_ZSTD_TARGET libzstd_static)
+    if(LO_TARGET_PLATFORM STREQUAL "ps5")
+        # zstd's trace hooks are weak undefined symbols; a PS5 title may import
+        # only what the console's modules export.
+        target_compile_definitions(libzstd_static PRIVATE ZSTD_TRACE=0)
+    endif()
 endif()
 
 add_library(lo_portable_shader_pack STATIC EXCLUDE_FROM_ALL
@@ -42,10 +47,53 @@ endif()
 add_executable(LoShaderPackTool EXCLUDE_FROM_ALL
     "${LO_PACK_ROOT}/tools/shader_pack/main.cpp"
     "${LO_PACK_ROOT}/tools/shader_pack/merge.cpp"
+    "${LO_PACK_ROOT}/tools/shader_pack/builtin_requests.cpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/lo_builtin_sources/builtin_sources.inc"
     "${LO_PACK_ROOT}/LostOdysseyRecomp/gpu/shader/xenos_translator.cpp"
     "${LO_PACK_ROOT}/LostOdysseyRecomp/gpu/shader/dxc_compiler.cpp")
+# The runtime's function-local built-in shader literals, copied verbatim.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+file(GLOB LO_BUILTIN_SHADER_INPUTS "${LO_PACK_ROOT}/LostOdysseyRecomp/gpu/*.cpp" "${LO_PACK_ROOT}/LostOdysseyRecomp/gpu/*.h"
+    "${LO_PACK_ROOT}/LostOdysseyRecomp/gpu/shader/smaa_pipeline.h")
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/lo_builtin_sources/builtin_sources.inc"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/lo_builtin_sources"
+    COMMAND "${Python3_EXECUTABLE}" "${LO_PACK_ROOT}/tools/shader_pack/extract_builtin_sources.py"
+        "${CMAKE_CURRENT_BINARY_DIR}/lo_builtin_sources/builtin_sources.inc"
+    DEPENDS "${LO_PACK_ROOT}/tools/shader_pack/extract_builtin_sources.py" ${LO_BUILTIN_SHADER_INPUTS}
+    VERBATIM)
+target_include_directories(LoShaderPackTool PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/lo_builtin_sources"
+    "${LO_PACK_ROOT}/LostOdysseyRecomp")
 target_include_directories(LoShaderPackTool PRIVATE "${LO_PACK_ROOT}/tools/XenosRecomp/thirdparty/dxc-bin/inc")
 target_link_libraries(LoShaderPackTool PRIVATE lo_portable_shader_pack fmt::fmt ${CMAKE_DL_LIBS})
+# Builds the PS5 built-in shader cache from the user's own discs (docs/PS5.md):
+# the XEX loader of XenonUtils (as tools/xexdump), the resource scanner, and
+# the builtin-cache command of LoShaderPackTool.
+set(LO_XENON_ROOT "${LO_PACK_ROOT}/tools/XenonRecomp")
+add_executable(LoShaderCacheBuilder EXCLUDE_FROM_ALL
+    "${LO_PACK_ROOT}/tools/shader_cache_builder/main.cpp"
+    "${LO_PACK_ROOT}/tools/shader_pack/builtin_requests.cpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/lo_builtin_sources/builtin_sources.inc"
+    "${LO_PACK_ROOT}/LostOdysseyRecomp/gpu/shader/xenos_translator.cpp"
+    "${LO_PACK_ROOT}/LostOdysseyRecomp/gpu/shader/dxc_compiler.cpp"
+    "${LO_XENON_ROOT}/XenonUtils/image.cpp"
+    "${LO_XENON_ROOT}/XenonUtils/xex.cpp"
+    "${LO_XENON_ROOT}/XenonUtils/xex_patcher.cpp"
+    "${LO_XENON_ROOT}/XenonUtils/memory_mapped_file.cpp"
+    "${LO_XENON_ROOT}/thirdparty/libmspack/libmspack/mspack/lzxd.c"
+    "${LO_XENON_ROOT}/thirdparty/tiny-AES-c/aes.c")
+target_include_directories(LoShaderCacheBuilder PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/lo_builtin_sources" "${LO_PACK_ROOT}/LostOdysseyRecomp" "${LO_PACK_ROOT}/thirdparty"
+    "${LO_PACK_ROOT}/tools/XenosRecomp/thirdparty/dxc-bin/inc"
+    "${LO_XENON_ROOT}/XenonUtils" "${LO_XENON_ROOT}/thirdparty/simde"
+    "${LO_XENON_ROOT}/thirdparty/libmspack/libmspack/mspack" "${LO_XENON_ROOT}/thirdparty/tiny-AES-c"
+    "${LO_XENON_ROOT}/thirdparty/TinySHA1")
+target_compile_definitions(LoShaderCacheBuilder PRIVATE NOMINMAX)
+target_compile_features(LoShaderCacheBuilder PRIVATE cxx_std_23)
+target_link_libraries(LoShaderCacheBuilder PRIVATE lo_portable_shader_pack fmt::fmt ${CMAKE_DL_LIBS})
+# Extracts the game's shaders from disc folders (docs/PS5.md). Header-only scanner.
+add_executable(LoShaderScan EXCLUDE_FROM_ALL "${LO_PACK_ROOT}/tools/shader_scan/main.cpp")
+target_include_directories(LoShaderScan PRIVATE "${LO_PACK_ROOT}/LostOdysseyRecomp" "${LO_PACK_ROOT}/thirdparty")
+target_compile_features(LoShaderScan PRIVATE cxx_std_23)
 add_executable(LoPortableShaderPackTest EXCLUDE_FROM_ALL "${LO_PACK_ROOT}/tools/tests/portable_shader_pack_test.cpp")
 target_link_libraries(LoPortableShaderPackTest PRIVATE lo_portable_shader_pack)
 add_executable(LoPortableShaderPackIntegrationTest EXCLUDE_FROM_ALL

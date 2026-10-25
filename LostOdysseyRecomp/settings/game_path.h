@@ -123,7 +123,8 @@ namespace settings::game_path
     inline Resolution Resolve(const std::filesystem::path& executableDirectory,
                              const std::optional<std::filesystem::path>& explicitGame = std::nullopt)
     {
-        const auto exeDirectory = AbsoluteFrom(executableDirectory, std::filesystem::current_path());
+        std::error_code currentError;
+        const auto exeDirectory = AbsoluteFrom(executableDirectory, std::filesystem::current_path(currentError));
 
         // An explicit path is an isolation boundary. Recognize only the
         // supplied candidate (install root, disc1, or default.xex). A missing

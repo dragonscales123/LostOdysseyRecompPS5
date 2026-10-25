@@ -22,6 +22,9 @@
 #include <unistd.h>
 #elif defined(__APPLE__) || defined(__FreeBSD__)
 #include <pthread.h>
+#if defined(__FreeBSD__)
+#include <pthread_np.h>
+#endif
 #endif
 
 namespace io_diagnostics

@@ -7,6 +7,7 @@
 #include <cpu/guest_thread.h>
 #include <hid/hid.h>
 #include <os/logger.h>
+#include <os/platform.h>
 #include <ranges>
 #include <unordered_set>
 
@@ -424,19 +425,61 @@ static uint32_t ContentCreate(uint32_t dwUserIndex, const char* szRootName, cons
                 // or a redirected/symlinked directory for another content type.
                 if (pContentData->dwContentType != XCONTENTTYPE_SAVEDATA)
                     return ERROR_ACCESS_DENIED;
+#if LO_PLATFORM_PS5
+                // No realpath here: the console's (the SDK's ps5_realpath)
+                // refused these paths, which turned every overwrite into a new
+                // slot. ValidContentName already rules out separators, "." and
+                // "..", so the save folder plus that one name stays inside it.
+                const auto saveRoot = GetSavePath().lexically_normal();
+                const auto target = rootPath.lexically_normal();
+                if (target.parent_path() != saveRoot) {
+                    LOG_WARNING("save: replace '{}': target {} outside {}", pContentData->szFileName,
+                                FileSystem::PathUtf8(target), FileSystem::PathUtf8(saveRoot));
+                    return ERROR_ACCESS_DENIED;
+                }
+#else
                 const auto saveRoot = std::filesystem::weakly_canonical(GetSavePath(), ec);
-                if (ec) return ERROR_ACCESS_DENIED;
+                if (ec) {
+                    LOG_WARNING("save: replace '{}': save folder unresolved: {}", pContentData->szFileName, ec.message());
+                    return ERROR_ACCESS_DENIED;
+                }
                 const auto target = std::filesystem::weakly_canonical(rootPath, ec);
-                if (ec || target.parent_path() != saveRoot)
+                if (ec || target.parent_path() != saveRoot) {
+                    LOG_WARNING("save: replace '{}': target {} outside {} ({})", pContentData->szFileName,
+                                FileSystem::PathUtf8(target), FileSystem::PathUtf8(saveRoot), ec.message());
                     return ERROR_ACCESS_DENIED;
+                }
+#endif
+#if LO_PLATFORM_PS5
+                // lstat is refused to a title (EPERM); IsSymlink asks readlink.
+                const bool symlink = FileSystem::IsSymlink(rootPath);
+#else
                 const bool symlink = std::filesystem::is_symlink(rootPath, ec);
-                if (ec || symlink)
+#endif
+                if (ec || symlink) {
+                    LOG_WARNING("save: replace '{}': symlink={} ({})", pContentData->szFileName, symlink, ec.message());
                     return ERROR_ACCESS_DENIED;
+                }
+#if LO_PLATFORM_PS5
+                // Replace the container's files where the console refuses to
+                // remove them: the game rewrites every file it keeps.
+                if (!FileSystem::RemoveTree(target, ec))
+                    LOG_WARNING("save: could not clear '{}' ({}: {}); overwriting it in place",
+                                FileSystem::PathUtf8(target), ec.value(), ec.message());
+                ec.clear();
+#else
                 std::filesystem::remove_all(target, ec);
-                if (ec) return ERROR_ACCESS_DENIED;
+                if (ec) {
+                    LOG_WARNING("save: could not clear '{}': {}", FileSystem::PathUtf8(target), ec.message());
+                    return ERROR_ACCESS_DENIED;
+                }
+#endif
             }
             std::filesystem::create_directories(rootPath, ec);
-            if (ec) return ERROR_ACCESS_DENIED;
+            if (ec) {
+                LOG_WARNING("save: could not create '{}': {}", root, ec.message());
+                return ERROR_ACCESS_DENIED;
+            }
             if (pContentData->dwContentType == XCONTENTTYPE_SAVEDATA)
             {
                 if (!FileSystem::WriteFileDurably(rootPath / ".lo-content", pContentData, sizeof(*pContentData)))

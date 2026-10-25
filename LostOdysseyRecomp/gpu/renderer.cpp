@@ -11972,10 +11972,22 @@ void main()
                         const bool copyBlend = !blend.blendEnabled ||
                             (blend.srcBlend == RenderBlend::ONE && blend.dstBlend == RenderBlend::ZERO &&
                              blend.blendOp == RenderBlendOperation::ADD);
-                        const bool alphaBlend = blend.blendEnabled &&
-                            blend.srcBlend == RenderBlend::SRC_ALPHA &&
-                            blend.dstBlend == RenderBlend::INV_SRC_ALPHA &&
-                            blend.blendOp == RenderBlendOperation::ADD;
+                        // Overlays drawn after the tone map: alpha blending, and the
+                        // blends sprites and effects use (additive, alpha-additive,
+                        // premultiplied alpha, multiply). The game's field effects are
+                        // additive; refusing them dropped every field frame to SDR
+                        // (PS5, ps 38b953b91dcfd9ce, 2026-10-25). Each writes the HDR
+                        // copy as it writes the SDR target.
+                        const auto blendIs = [&](RenderBlend src, RenderBlend dst) {
+                            return blend.srcBlend == src && blend.dstBlend == dst;
+                        };
+                        const bool alphaBlend = blend.blendEnabled && blend.blendOp == RenderBlendOperation::ADD &&
+                            (blendIs(RenderBlend::SRC_ALPHA, RenderBlend::INV_SRC_ALPHA) ||
+                             blendIs(RenderBlend::ONE, RenderBlend::ONE) ||
+                             blendIs(RenderBlend::SRC_ALPHA, RenderBlend::ONE) ||
+                             blendIs(RenderBlend::ONE, RenderBlend::INV_SRC_ALPHA) ||
+                             blendIs(RenderBlend::DEST_COLOR, RenderBlend::ZERO) ||
+                             blendIs(RenderBlend::ZERO, RenderBlend::SRC_COLOR));
                         bool aliasesTarget = false;
                         bool samplesSdrHdrSource = false;
                         for (const auto& bank : textureBindings)
@@ -12084,8 +12096,21 @@ void main()
                             color->hdrValid = false;
                             static uint32_t rejected = 0;
                             if (rejected++ < 24)
-                                LOG_INFO("renderer HDR: SDR fallback frame={} ps={:016x} reason={}",
-                                    frame, key.ps, reject);
+                                LOG_INFO("renderer HDR: SDR fallback frame={} ps={:016x} reason={} blend={}/{}/{}",
+                                    frame, key.ps, reject, int(blend.srcBlend), int(blend.dstBlend), int(blend.blendOp));
+                            // Every rejection, summed: the first 24 lines above can all
+                            // be one draw, hiding what else keeps a frame in SDR.
+                            static std::map<std::pair<uint64_t, std::string>, uint32_t> tally;
+                            static uint64_t tallyFrame = frame;
+                            ++tally[{key.ps, std::string(reject)}];
+                            if (frame >= tallyFrame + 600) {
+                                std::string text;
+                                for (const auto& [what, count] : tally)
+                                    text += fmt::format(" ps={:016x}:{}x{}", what.first, what.second, count);
+                                LOG_INFO("renderer HDR: SDR fallbacks over frames {}-{}:{}", tallyFrame, frame, text);
+                                tally.clear();
+                                tallyFrame = frame;
+                            }
                         }
                     }
                 }

@@ -1,5 +1,9 @@
 #include <stdafx.h>
 #include "memory.h"
+#include <os/platform.h>
+#if LO_PLATFORM_PS5
+#include <os/ps5_title.h>
+#endif
 #include "guest_address_space.h"
 #include "updater/apply_arguments.h"
 #include <os/logger.h>
@@ -89,6 +93,9 @@ Memory::Memory()
             InsertFunction(PPCFuncMappings[i].guest, PPCFuncMappings[i].host);
     }
     InstallFunctionTracers();
+#if LO_PLATFORM_PS5
+    os::ps5::Breadcrumb("guest memory: function table filled");
+#endif
 }
 
 void* MmGetHostAddress(uint32_t ptr)

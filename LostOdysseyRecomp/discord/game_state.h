@@ -9,7 +9,7 @@ namespace discord_rpc
 {
 // All guest memory reads stay on the existing engine tick. The worker receives
 // only Snapshot's owned, player-facing strings; it never accesses guest memory.
-#if defined(__ANDROID__) || defined(__SWITCH__) || defined(__NX__)
+#if defined(__ANDROID__) || defined(__SWITCH__) || defined(__NX__) || defined(__PROSPERO__)
 inline void Tick(uint8_t*) {}
 #else
 void Tick(uint8_t* base);
@@ -34,7 +34,7 @@ constexpr Mode Classify(const Observed& s)
     return Mode::Exploring;
 }
 
-#if !defined(__ANDROID__) && !defined(__SWITCH__) && !defined(__NX__)
+#if !defined(__ANDROID__) && !defined(__SWITCH__) && !defined(__NX__) && !defined(__PROSPERO__)
 // Engine thread only. Also exercised directly by the CPU fixture so its timing
 // includes the real guest reads, location conversion and snapshot allocation.
 Snapshot Sample(uint8_t* base, std::string_view previousLocation = {});

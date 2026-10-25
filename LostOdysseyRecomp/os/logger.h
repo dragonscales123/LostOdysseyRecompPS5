@@ -1,5 +1,6 @@
 #pragma once
 
+#include "platform.h"
 #include <fmt/core.h>
 #include <atomic>
 #include <chrono>
@@ -103,6 +104,16 @@ namespace os::logger
             : type == LogType::Verbose ? ANDROID_LOG_VERBOSE : ANDROID_LOG_DEBUG;
         __android_log_write(priority, "LostOdyssey", line.c_str());
         if (g_file)
+            return;
+#endif
+#if LO_PLATFORM_PS5
+        // Standard error is a pipe a single thread drains into klog
+        // (os/ps5_title.cpp), one sceKernelDebugOutText per line. Mirroring
+        // every line (hundreds a second while a scene streams, with the
+        // diagnostic log on) can fill that pipe and block this write while it
+        // holds the log lock, stalling every thread that logs. With the log
+        // file open, klog gets only warnings and errors.
+        if (g_file && type != LogType::Warning && type != LogType::Error)
             return;
 #endif
         fwrite(line.data(), 1, line.size(), stderr);

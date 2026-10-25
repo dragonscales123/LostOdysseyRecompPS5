@@ -17,7 +17,7 @@ struct Snapshot
 
 using LogCallback = void (*)(const char*);
 
-#if defined(__ANDROID__) || defined(__SWITCH__) || defined(__NX__)
+#if defined(__ANDROID__) || defined(__SWITCH__) || defined(__NX__) || defined(__PROSPERO__)
 inline void Initialize(LogCallback = nullptr) {}
 inline void Shutdown() {}
 inline void SetEnabled(bool) {}

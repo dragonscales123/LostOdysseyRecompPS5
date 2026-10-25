@@ -130,7 +130,7 @@ file(GLOB_RECURSE LO_RUNTIME_SOURCES CONFIGURE_DEPENDS
     "${LO_RUNTIME_ROOT}/*.h")
 list(FILTER LO_RUNTIME_SOURCES EXCLUDE REGEX "imports_stubs\\.cpp$")
 # Discord Rich Presence is a desktop host service.
-if(ANDROID OR LO_TARGET_PLATFORM STREQUAL "switch")
+if(ANDROID OR LO_TARGET_PLATFORM STREQUAL "switch" OR LO_TARGET_PLATFORM STREQUAL "ps5")
     list(FILTER LO_RUNTIME_SOURCES EXCLUDE REGEX "/discord/")
 endif()
 list(FILTER LO_RUNTIME_SOURCES EXCLUDE REGEX "updater/posix_ui\\.cpp$")
@@ -240,6 +240,10 @@ target_link_libraries(LostOdysseyRecomp PRIVATE
     SDL3::SDL3)
 if(ANDROID)
     target_link_libraries(LostOdysseyRecomp PRIVATE android log dl nlohmann_json::nlohmann_json)
+elseif(LO_TARGET_PLATFORM STREQUAL "ps5")
+    # Linked as a title by ps5/link-title.sh (cmake/LoPs5.cmake); the console's
+    # modules and the SDK's platform layer come from PS5_Vulkan's link recipe.
+    # No libcurl: updater/ps5_http.cpp.
 elseif(UNIX)
     set_target_properties(LostOdysseyRecomp PROPERTIES
         INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib")

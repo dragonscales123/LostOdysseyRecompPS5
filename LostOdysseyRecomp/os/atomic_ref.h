@@ -5,9 +5,16 @@
 #include <type_traits>
 
 #if !defined(__cpp_lib_atomic_ref)
+#if defined(__PROSPERO__)
+// PS5 homebrew: libc++ without atomic_ref and no futex; waits sleep on hashed
+// mutex/condition-variable buckets (plain pthreads) instead.
+#include <condition_variable>
+#include <mutex>
+#else
 #include <linux/futex.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#endif
 #endif
 
 namespace os {
@@ -23,6 +30,20 @@ inline std::atomic<uint32_t> futexWaiters[64]{};
 inline std::atomic<uint32_t>& FutexWaiters(const void* address) {
     return futexWaiters[(reinterpret_cast<uintptr_t>(address) >> 2) & 63];
 }
+#if defined(__PROSPERO__)
+// One sleeping place per hashed word, shared by the words that hash to it, so
+// a wake is broadcast and each waiter re-checks its own word. A waiter checks
+// its value under the bucket's mutex and the notifier takes that mutex before
+// waking: no wake is lost between the check and the sleep.
+struct WaitBucket {
+    std::mutex mutex;
+    std::condition_variable condition;
+};
+inline WaitBucket waitBuckets[64];
+inline WaitBucket& Bucket(const void* address) {
+    return waitBuckets[(reinterpret_cast<uintptr_t>(address) >> 2) & 63];
+}
+#endif
 inline void SpinPause() {
 #if defined(__aarch64__)
     asm volatile("yield");
@@ -74,15 +95,32 @@ public:
         }
         auto& waiters = detail::FutexWaiters(value_);
         waiters.fetch_add(1);
+#if defined(__PROSPERO__)
+        {
+            auto& bucket = detail::Bucket(value_);
+            std::unique_lock lock(bucket.mutex);
+            while (load() == old)
+                bucket.condition.wait(lock);
+        }
+#else
         while (load() == old)
             syscall(SYS_futex, value_, FUTEX_WAIT_PRIVATE, old, nullptr, nullptr, 0);
+#endif
         waiters.fetch_sub(1);
     }
     // The caller's preceding store must be seq_cst (see detail::futexWaiters).
     void notify_one() const {
         static_assert(sizeof(T) == 4);
         if (detail::FutexWaiters(value_).load())
+        {
+#if defined(__PROSPERO__)
+            auto& bucket = detail::Bucket(value_);
+            { std::lock_guard lock(bucket.mutex); }
+            bucket.condition.notify_all();
+#else
             syscall(SYS_futex, value_, FUTEX_WAKE_PRIVATE, 1, nullptr, nullptr, 0);
+#endif
+        }
     }
 };
 #endif
