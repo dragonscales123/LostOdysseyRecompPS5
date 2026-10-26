@@ -64,9 +64,11 @@ entry points cannot be linked into a title):
 3. Your Disc 1 `default.xex` at `LostOdysseyRecompLib/private/disc1/`, then
    `xexdump` and `python3 -B tools/ppc_codegen.py generate` as in BUILDING.md.
 4. `ps5/build.sh` writes `out/build/ps5/dist/PPSA99212/`.
-5. Add `shaders/portable_vk.lospv` (the pack whose contract
-   `LoShaderPackTool contract image_disc1.bin` prints, from the `shader-packs`
-   release) and `shaders/pipelines_corpus.bin`.
+5. Add the shaders: run the shader cache builder (below), which downloads
+   `shaders/portable_vk.lospv` and `shaders/pipelines_corpus.bin` and builds
+   `cache/`. By hand, the pack is the one whose contract
+   `LoShaderPackTool contract image_disc1.bin` prints, from upstream's
+   `shader-packs` release; `ps5/update.sh` fetches it too.
 
 ## Updating
 
@@ -92,13 +94,20 @@ turns the HDR formats off.
 
 ## Install and run
 
-1. Copy the title folder to `/data/homebrew/PPSA99212/` (FTP or ps5upload),
-   with `ps5/ps5-env.example.txt` copied as `ps5-env.txt` if you want any of
-   the switches below.
-2. Copy your extracted disc files to `/data/homebrew/PPSA99212/game/disc1/`
+Players use the release zips and build nothing but the shaders; the README's
+[Getting started](../README.md#getting-started) has the same steps.
+
+1. Copy the title folder to `/data/homebrew/PPSA99212/` (FTP or ps5upload):
+   `PPSA99212` from `LostOdyssey-PS5.zip`, or `out/build/ps5/dist/PPSA99212/`
+   from your own build. `ps5-env.txt` (from `ps5/ps5-env.example.txt`) holds
+   the optional switches below.
+2. Run the shader cache builder on your PC (below) and copy the `cache` and
+   `shaders` folders it makes into `/data/homebrew/PPSA99212/`. It downloads
+   the game's Vulkan shader pack and builds the rest from your discs.
+3. Copy your extracted disc files to `/data/homebrew/PPSA99212/game/disc1/`
    (and `disc2/` to `disc4/`). Do this over FTP rather than with the in-game
    importer: a title's own writes slow to about 2 MiB/s after 1.3 GiB.
-3. With an enabler that runs fake-signed titles and ShadowMountPlus loaded,
+4. With an enabler that runs fake-signed titles and ShadowMountPlus loaded,
    launch **Lost Odyssey** from the home screen.
 
 ### Switches (`ps5-env.txt`)
@@ -166,18 +175,30 @@ when a pack does lack some.
 
 ### Shader cache builder (for players)
 
-The cache is derived from the game's shaders, so it is not published: each
-player builds it from their own discs with `LoShaderCacheBuilder <folder with
-disc1..disc4> [output] [--no-motion-replay]` (`tools/shader_cache_builder`).
-It decrypts `default.xex` with XenonUtils (as `xexdump`) for the four shaders
-it holds, scans the four discs (as `LoShaderScan --full`), runs `builtin-cache
---expand`, and deletes the extracted game shaders. The release package's
-scripts (`tools/shader_cache_builder/package/`) first download the upstream
-Vulkan pack and pipeline corpus this build was made for into `shaders/`,
-checked by SHA-256, so players copy `cache/` and `shaders/` and nothing else.
-Update the file names and hashes in both scripts when the runtime moves to a
-new pack. About 36,000 shaders with
-motion replay (1.9 GB), 8,000 without (600 MB).
+The release's `LostOdyssey-PS5-ShaderCacheBuilder.zip` makes every shader the
+console needs, in one run on a Windows or Linux PC (`Build PS5 shader
+cache.bat` or `linux/build-shader-cache.sh`; its `README.txt` has the steps).
+Its output folder holds both:
+
+- `shaders/portable_vk.lospv` and `shaders/pipelines_corpus.bin`: the game's
+  own shaders, the upstream Vulkan pack and pipeline corpus this build was made
+  for, downloaded from upstream's `shader-packs` release and checked by
+  SHA-256 (skipped when already present and correct);
+- `cache/shaders/builtin_v28_spirv.lostore`: the runtime's built-in shaders
+  and the ones it derives from the game's, compiled from the player's own
+  discs. It is derived from the game's shaders, so it is not published.
+
+Players copy `cache/` and `shaders/` into the title folder and nothing else.
+The download is done by the package's scripts
+(`tools/shader_cache_builder/package/`); update the file names and hashes in
+both scripts when the runtime moves to a new pack.
+
+The compiler itself is `LoShaderCacheBuilder <folder with disc1..disc4>
+[output] [--no-motion-replay]` (`tools/shader_cache_builder`). It decrypts
+`default.xex` with XenonUtils (as `xexdump`) for the four shaders it holds,
+scans the four discs (as `LoShaderScan --full`), runs `builtin-cache --expand`,
+and deletes the extracted game shaders. About 36,000 shaders with motion replay
+(1.9 GB), 8,000 without (600 MB).
 
 Build it for Linux with `ninja LoShaderCacheBuilder` in the pack tool build
 (`cmake -S tools/shader_pack`), and for Windows from Linux with
