@@ -38,17 +38,16 @@ Experimental. Tested on one console (firmware 13.60) with the USA/Europe four-di
 Download both files from the **[Releases page](https://github.com/dragonscales123/LostOdysseyRecompPS5/releases)**:
 
 - `LostOdyssey-PS5.zip`: the ready-to-copy title folder.
-- `LostOdyssey-PS5-ShaderCacheBuilder.zip`: builds the shaders from your own discs.
+- `LostOdyssey-PS5-ShaderCacheBuilder.zip`: makes the shaders on your PC, from your own discs.
 
-You don't need to compile anything. The only things you add yourself are the shaders and your discs, because neither can be distributed.
+You don't need to compile anything. The only things you add yourself are the shaders, which the builder makes for you, and your discs.
 
 **You need:** a PS5 that runs homebrew titles (tested on firmware 13.60) with an enabler for fake-signed titles and ShadowMountPlus loaded, FTP access to the console, and a Windows or Linux PC with your extracted Lost Odyssey discs (one folder holding `disc1` to `disc4`).
 
 1. **Copy the title.** Unzip `LostOdyssey-PS5.zip` and copy its `PPSA99212` folder to `/data/homebrew/PPSA99212/` on the PS5.
-2. **Make the shader cache.** Unzip the shader cache builder on your PC and run it on your disc folder (Windows: double-click `Build PS5 shader cache.bat`; its `README.txt` has the details). It takes 30-90 minutes. Copy the `cache` folder it makes into `/data/homebrew/PPSA99212/`.
-3. **Get the shader pack.** Download the game's shader pack from the upstream project into `/data/homebrew/PPSA99212/shaders/`, named `portable_vk.lospv`. The exact link is in `shaders/PUT_SHADER_PACK_HERE.txt`.
-4. **Copy your discs.** Copy your extracted `disc1` to `disc4` folders into `/data/homebrew/PPSA99212/game/` over FTP. Don't use the in-game importer: the console writes slowly from inside a title.
-5. **Play.** Launch **Lost Odyssey** from the home screen.
+2. **Make the shaders.** Unzip the shader cache builder on your PC and run it on your disc folder (Windows: double-click `Build PS5 shader cache.bat`; its `README.txt` has the details). It downloads the game's shader pack from the upstream project and builds the rest from your discs, in 30-90 minutes. Copy the `cache` and `shaders` folders it makes into `/data/homebrew/PPSA99212/`.
+3. **Copy your discs.** Copy your extracted `disc1` to `disc4` folders into `/data/homebrew/PPSA99212/game/` over FTP. Don't use the in-game importer: the console writes slowly from inside a title.
+4. **Play.** Launch **Lost Odyssey** from the home screen.
 
 **Tips**
 

@@ -171,7 +171,12 @@ player builds it from their own discs with `LoShaderCacheBuilder <folder with
 disc1..disc4> [output] [--no-motion-replay]` (`tools/shader_cache_builder`).
 It decrypts `default.xex` with XenonUtils (as `xexdump`) for the four shaders
 it holds, scans the four discs (as `LoShaderScan --full`), runs `builtin-cache
---expand`, and deletes the extracted game shaders. About 36,000 shaders with
+--expand`, and deletes the extracted game shaders. The release package's
+scripts (`tools/shader_cache_builder/package/`) first download the upstream
+Vulkan pack and pipeline corpus this build was made for into `shaders/`,
+checked by SHA-256, so players copy `cache/` and `shaders/` and nothing else.
+Update the file names and hashes in both scripts when the runtime moves to a
+new pack. About 36,000 shaders with
 motion replay (1.9 GB), 8,000 without (600 MB).
 
 Build it for Linux with `ninja LoShaderCacheBuilder` in the pack tool build
