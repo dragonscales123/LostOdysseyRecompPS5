@@ -8,7 +8,7 @@
 
 An experimental homebrew build of [LostOdysseyRecomp](https://github.com/freefrank/LostOdysseyRecomp) for PlayStation 5 consoles that run homebrew titles.
 
-[Build and install](docs/PS5.md) · [Upstream project](https://github.com/freefrank/LostOdysseyRecomp) · [License: GPL-3.0](LICENSE)
+### [Download](https://github.com/dragonscales123/LostOdysseyRecompPS5/releases) · [Install guide](#getting-started) · [Upstream project](https://github.com/freefrank/LostOdysseyRecomp) · [License: GPL-3.0](LICENSE)
 
 </div>
 
@@ -35,14 +35,31 @@ Experimental. Tested on one console (firmware 13.60) with the USA/Europe four-di
 
 ## Getting started
 
-Everything is in **[docs/PS5.md](docs/PS5.md)**:
+Download both files from the **[Releases page](https://github.com/dragonscales123/LostOdysseyRecompPS5/releases)**:
 
-1. **Build** the title on Linux from your Disc 1 `default.xex`, with the PS5 SDK and Vulkan driver projects listed there (exact commits included).
-2. **Build the shader cache** from your own discs with `LoShaderCacheBuilder` (Windows or Linux). It is not distributed because it is derived from the game.
-3. **Install** the title folder to `/data/homebrew/PPSA99212/` and copy your disc files to its `game/` folder over FTP.
-4. **Optional switches** go in `ps5-env.txt` next to `eboot.bin` (see [ps5/ps5-env.example.txt](ps5/ps5-env.example.txt)).
+- `LostOdyssey-PS5.zip`: the ready-to-copy title folder.
+- `LostOdyssey-PS5-ShaderCacheBuilder.zip`: builds the shaders from your own discs.
 
-Logs are written to `/data/homebrew/PPSA99212/logs/`. Please include one with any bug report.
+You don't need to compile anything. The only things you add yourself are the shaders and your discs, because neither can be distributed.
+
+**You need:** a PS5 that runs homebrew titles (tested on firmware 13.60) with an enabler for fake-signed titles and ShadowMountPlus loaded, FTP access to the console, and a Windows or Linux PC with your extracted Lost Odyssey discs (one folder holding `disc1` to `disc4`).
+
+1. **Copy the title.** Unzip `LostOdyssey-PS5.zip` and copy its `PPSA99212` folder to `/data/homebrew/PPSA99212/` on the PS5.
+2. **Make the shader cache.** Unzip the shader cache builder on your PC and run it on your disc folder (Windows: double-click `Build PS5 shader cache.bat`; its `README.txt` has the details). It takes 30-90 minutes. Copy the `cache` folder it makes into `/data/homebrew/PPSA99212/`.
+3. **Get the shader pack.** Download the game's shader pack from the upstream project into `/data/homebrew/PPSA99212/shaders/`, named `portable_vk.lospv`. The exact link is in `shaders/PUT_SHADER_PACK_HERE.txt`.
+4. **Copy your discs.** Copy your extracted `disc1` to `disc4` folders into `/data/homebrew/PPSA99212/game/` over FTP. Don't use the in-game importer: the console writes slowly from inside a title.
+5. **Play.** Launch **Lost Odyssey** from the home screen.
+
+**Tips**
+
+- **120 FPS:** use a 120 Hz display and choose 120 in Graphics → Frame rate.
+- **HDR:** set the PS5 to HDR "On when supported", then turn on HDR in Graphics.
+- **Bug reports:** logs are in `/data/homebrew/PPSA99212/logs/` (start-up steps in `boot.txt`). Please attach the newest one.
+- **Optional switches** go in `ps5-env.txt` next to `eboot.bin`; [docs/PS5.md](docs/PS5.md#switches-ps5-envtxt) lists them.
+
+### Building from source
+
+Only needed if you want to change the code: [docs/PS5.md](docs/PS5.md) covers building the title on Linux, with the exact versions of the PS5 SDK and Vulkan driver projects it uses.
 
 ## Credits
 
