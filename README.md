@@ -30,8 +30,9 @@ Experimental. Tested on one console (firmware 13.60) with the USA/Europe four-di
 | Frame rate | 120 FPS at 2560x1440 on a 120 Hz display, 60 FPS on 60 Hz |
 | HDR | HDR10 output with peak-brightness calibration (needs the RADV patch) |
 | Controller | DualSense, with PlayStation button prompts |
-| Known issues | A few seconds of lower frame rate at the start of a battle and after some loads |
-| Untested | Discs 2-4, long play sessions |
+| Known issues | A few seconds at about 70-80 FPS at the start of a battle |
+| Long play | A two-hour session with many area loads and cutscenes ran without a crash |
+| Untested | Discs 2-4 |
 
 ## Getting started
 
@@ -54,6 +55,7 @@ You don't need to compile anything. The only things you add yourself are the sha
 - **120 FPS:** use a 120 Hz display and choose 120 in Graphics → Frame rate.
 - **HDR:** set the PS5 to HDR "On when supported", then turn on HDR in Graphics.
 - **Bug reports:** logs are in `/data/homebrew/PPSA99212/logs/` (start-up steps in `boot.txt`). Please attach the newest one.
+- **Restore HP / MP on save:** press **L1+R1** for the debug menu, open **Cheats**, and turn it on in Quick tools. The party's HP and MP refill after every save.
 - **Optional switches** go in `ps5-env.txt` next to `eboot.bin`; [docs/PS5.md](docs/PS5.md#switches-ps5-envtxt) lists them.
 
 ### Building from source

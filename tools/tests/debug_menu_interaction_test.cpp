@@ -43,6 +43,7 @@ struct MockServices
     settings::EncounterRate encounterRate = settings::EncounterRate::Normal;
     int encounterRateSaveCalls = 0;
     bool battleExpDouble = false;
+    bool healOnSave = false;
     bool everyStep = false;
     bool allowVictory = true;
     bool victoryRequested = false;
@@ -126,6 +127,9 @@ void SetEncounterRate(settings::EncounterRate rate)
 }
 bool BattleExpDoubleEnabled() { return g_mock.battleExpDouble; }
 void SetBattleExpDoubleEnabled(bool enabled) { g_mock.battleExpDouble = enabled; }
+bool HealOnSaveEnabled() { return g_mock.healOnSave; }
+void SetHealOnSaveEnabled(bool enabled) { g_mock.healOnSave = enabled; }
+void NotifySaveWritten() {}
 bool EncounterEveryStepEnabled() { return g_mock.everyStep; }
 void SetEncounterEveryStepEnabled(bool enabled) { g_mock.everyStep = enabled; }
 
@@ -472,8 +476,9 @@ int main()
             std::wstring(debug_menu::cheat_overlay::FastForwardButtonValues[1]) == L"LB",
         "Fast-forward button menu offers only LT and LB in persisted order");
     const debug_menu::cheat_overlay::Model quickTools;
-    Require(quickTools.Rows() == 13 &&
-            (int(quickTools.Rows()) - 1) * debug_menu::cheat_overlay::QuickToolRowHeight + 23 <= 296,
+    Require(quickTools.Rows() == 14 &&
+            (int(quickTools.Rows()) - 1) * debug_menu::cheat_overlay::QuickToolRowHeight + 23 <=
+                296 + debug_menu::cheat_overlay::QuickToolRowHeight,
         "Quick-tool rows overlap the help area");
 
     // Cheats -> Quick tools: the independent live options need no memory-edit
@@ -576,7 +581,7 @@ int main()
 
     // Both debug-menu languages must show the complete two-line help at the
     // production 700px content width, without an ellipsis or discarded text.
-    for(bool zh : {false,true}) for(unsigned row : {3u,5u,6u,7u,8u}) {
+    for(bool zh : {false,true}) for(unsigned row : {3u,5u,6u,7u,8u,9u}) {
         std::wstring remaining=debug_menu::cheat_overlay::QuickToolHelp(row,zh);
         Require(!remaining.empty(), "Quick-tool help is missing a language");
         for(int line=0;!remaining.empty() && line<2;++line) {

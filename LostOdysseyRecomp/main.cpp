@@ -486,6 +486,7 @@ int main(int argc, char* argv[])
     StartGuestSampler();
 #if LO_PLATFORM_PS5
     LOG_NOTICE("guest clock: TSC {} Hz", sceKernelGetTscFrequency());
+    os::ps5::StartMemoryLog();
 #endif
     os::diagnostics::LogStartupEnvironment();
 #ifdef _WIN32

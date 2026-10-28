@@ -62,7 +62,7 @@ void ApplyEditor(uint8_t* base, bool enabled) {
 void Tick(PPCContext& ctx, uint8_t* base) {
     const uint64_t now = host_ui::GetActiveGameTimeMs();
     const auto previous = session.Get();
-    if (now < nextSnapshot && !session.HasPending() && !previous.editorRequested && !savedEditorFlag) return;
+    if (now < nextSnapshot && !session.HasPending() && !session.SaveHealPending() && !previous.editorRequested && !savedEditorFlag) return;
     nextSnapshot = now + 250;
     Context context;
     Memory memory{{}};

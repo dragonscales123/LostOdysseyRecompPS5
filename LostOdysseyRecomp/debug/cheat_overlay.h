@@ -3,6 +3,7 @@
 #include "fast_forward.h"
 #include "no_encounters.h"
 #include "battle_exp.h"
+#include "heal_on_save.h"
 #include "../host_ui/rasterizer.h"
 #include "../settings/config.h"
 #include "controller_hint.h"
@@ -35,6 +36,7 @@ inline unsigned EncounterRateIndex() {
 }
 inline constexpr const wchar_t* BattleExpLabel[] = {L"Battle EXP ×2",L"战斗 EXP ×2"};
 inline constexpr const wchar_t* MenuAnimationLabel[] = {L"Menu animations",L"菜单动画"};
+inline constexpr const wchar_t* HealOnSaveLabel[] = {L"Restore HP / MP on save",L"存档时恢复 HP / MP"};
 inline constexpr const wchar_t* MenuAnimationValues[][2] = {
     {L"Normal (1x)",L"正常 (1x)"}, {L"Fast (2x)",L"快速 (2x)"}, {L"Faster (4x)",L"更快 (4x)"}};
 inline constexpr const wchar_t* MenuAnimationHelp[] = {
@@ -58,7 +60,7 @@ struct Model {
     Request request;
     std::wstring notice;
     unsigned menuAnimationRate=1;
-    unsigned Rows() const { constexpr unsigned rows[]={13,8,6,5,7,2}; return rows[category]; }
+    unsigned Rows() const { constexpr unsigned rows[]={14,8,6,5,7,2}; return rows[category]; }
     void ChangeCategory(int direction) { category=Wrap(category,direction,unsigned(std::size(Categories))); row=0; }
     std::span<const cheats::data::Entry> EquipmentList() const {
         if (equipmentSlot==0) return cheats::data::Weapons;
@@ -178,12 +180,14 @@ struct Model {
                 for(unsigned i=0;i<std::size(settings::MenuAnimationRates);++i)
                     if(settings::MenuAnimationRates[i]==menuAnimationRate)index=i;
                 menuAnimationRate=settings::MenuAnimationRates[Wrap(index,direction,unsigned(std::size(settings::MenuAnimationRates)))];
-            } else if (row==9 && activate) {
+            } else if (row==9) {
+                debug_menu::SetHealOnSaveEnabled(!debug_menu::HealOnSaveEnabled());
+            } else if (row==10 && activate) {
                 if (cheats::session.Get().enabled) cheats::session.Enable(false);
                 else { confirmation=Confirmation::Enable; confirm=true; yes=false; }
-            } else if (activate && row==10) Write(Action::AddGold,100000,0,false,zh);
-            else if (activate && row==11) Write(Action::SetGold,cheats::GoldLimit,0,true,zh);
-            else if (activate && row==12) Write(Action::HealParty,0,0,false,zh);
+            } else if (activate && row==11) Write(Action::AddGold,100000,0,false,zh);
+            else if (activate && row==12) Write(Action::SetGold,cheats::GoldLimit,0,true,zh);
+            else if (activate && row==13) Write(Action::HealParty,0,0,false,zh);
         } else if (category==1) {
             if(row==1) { if(activate)Open(Picker::Character,character);else character=Wrap(character,direction,9); }
             else if(row==2 && activate) Write(Action::Heal,0,0,false,zh);
@@ -248,6 +252,9 @@ inline const wchar_t* QuickToolHelp(unsigned row,bool zh) {
         ? L"战斗经验加倍，SP 与金币不变。"
         : L"Doubles battle EXP. SP and gold stay unchanged.";
     if(row==8) return MenuAnimationHelp[zh];
+    if(row==9) return zh
+        ? L"每次存档后恢复当前队伍的 HP 和 MP（回到可操作场景时执行）。无需开启内存修改。"
+        : L"Refills the party's HP and MP after every save, once you are back in the field. Works without memory edits.";
     return nullptr;
 }
 inline void Render(host_ui::Rasterizer& r,const Model& m,bool zh,int x,int y,int width,bool playStation) {
@@ -293,10 +300,11 @@ inline void Render(host_ui::Rasterizer& r,const Model& m,bool zh,int x,int y,int
         row(6,EncounterRateLabel[zh],EncounterRateValues[EncounterRateIndex()][zh]);
         row(7,BattleExpLabel[zh],debug_menu::BattleExpDoubleEnabled() ? L"ON":L"OFF");
         row(8,MenuAnimationLabel[zh],MenuAnimationValue(m.menuAnimationRate,zh));
-        row(9,zh ? L"允许内存修改" : L"Allow memory edits",s.enabled ? L"ON":L"OFF");
-        row(10,zh ? L"增加 100,000 金币" : L"Add 100,000 gold",L"",writable);
-        row(11,zh ? L"金币设为 9,999,999" : L"Set gold to 9,999,999",L"",writable);
-        row(12,zh ? L"恢复当前队伍 HP / MP" : L"Restore party HP / MP",L"",writable);
+        row(9,HealOnSaveLabel[zh],debug_menu::HealOnSaveEnabled() ? L"ON":L"OFF");
+        row(10,zh ? L"允许内存修改" : L"Allow memory edits",s.enabled ? L"ON":L"OFF");
+        row(11,zh ? L"增加 100,000 金币" : L"Add 100,000 gold",L"",writable);
+        row(12,zh ? L"金币设为 9,999,999" : L"Set gold to 9,999,999",L"",writable);
+        row(13,zh ? L"恢复当前队伍 HP / MP" : L"Restore party HP / MP",L"",writable);
     } else if(m.category==1) {
         row(1,zh ? L"角色" : L"Character",charName);
         row(2,zh ? L"恢复 HP / MP" : L"Restore HP / MP",L"",writable);
@@ -355,7 +363,7 @@ inline void Render(host_ui::Rasterizer& r,const Model& m,bool zh,int x,int y,int
         }
     };
     const auto quickHelp=m.category==0 ? QuickToolHelp(m.row,zh):nullptr;
-    paragraph(x,y+296,quickHelp ? quickHelp
+    paragraph(x,y+296+QuickToolRowHeight,quickHelp ? quickHelp
         : (playStation && m.category==2)
         ? (zh ? L"选择物品：按确定键打开可翻页列表；修改后在游戏内整理物品以刷新。"
               : L"Choose item: Confirm opens a paged list. Sort the inventory once to refresh.")
@@ -368,8 +376,8 @@ inline void Render(host_ui::Rasterizer& r,const Model& m,bool zh,int x,int y,int
                 L" MP "+std::to_wstring(unsigned(c.mp))+L"/"+std::to_wstring(unsigned(c.maxMp));
         } else status+=L" | Gold: "+std::to_wstring(s.gold);
     }
-    drawText(x,y+340,status,width,s.result==cheats::Result::Invalid ? gold:text);
-    if(!m.notice.empty())drawText(x,y+366,m.notice,width,gold);
+    drawText(x,y+340+QuickToolRowHeight,status,width,s.result==cheats::Result::Invalid ? gold:text);
+    if(!m.notice.empty())drawText(x,y+366+QuickToolRowHeight,m.notice,width,gold);
     if(m.picker!=Picker::None) {
         r.FillRect(x,y,width,365,color(252,24,31,42));
         drawText(x+16,y+12,zh ? L"选择条目   左 / 右：翻页" : L"Select an entry   Left / Right: page",width-32,gold);

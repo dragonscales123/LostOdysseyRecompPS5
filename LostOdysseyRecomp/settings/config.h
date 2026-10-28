@@ -185,6 +185,7 @@ struct Config
     bool saveAnywhere = false; // Debug-only preference; defaults off for existing profiles.
     EncounterRate encounterRate = EncounterRate::Normal; // Debug-only walking encounters.
     bool battleExpDouble = false; // Debug-only battle reward preference.
+    bool healOnSave = false; // Debug-menu quick tool: refill the party's HP and MP after each save.
     // Debug-menu fast-forward, persisted like saveAnywhere: switch, 0 Hold / 1 Toggle,
     // multiplier (one of debug_menu::fast_forward::Rates).
     bool fastForward = false;
@@ -203,6 +204,7 @@ bool SaveDebugLanguage(uint32_t language);
 bool SaveSaveAnywhere(bool enabled);
 bool SaveEncounterRate(EncounterRate rate);
 bool SaveBattleExpDouble(bool enabled);
+bool SaveHealOnSave(bool enabled);
 bool SaveFastForward(bool enabled, uint32_t mode, uint32_t rate, bool keepAudioPitch, uint32_t button);
 bool SaveMenuAnimationRate(uint32_t rate);
 // Cheap, thread-safe read for the camp-menu tween hook.

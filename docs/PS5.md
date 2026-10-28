@@ -7,13 +7,14 @@ RADV built for the console and linked into the title) and builds with the
 [PS5_PayloadSDK](https://github.com/mihawk-99/PS5_PayloadSDK). No game data,
 Sony code or console firmware is involved; supply your own disc files.
 
-Status (2026-10-25, one console, firmware 13.60, USA/Europe discs): boots to
+Status (2026-10-27, one console, firmware 13.60, USA/Europe discs): boots to
 the title menu, plays movies, field and battles render fully, saves and
 overwrites saves. 120 FPS at 2560x1440 on a 120 Hz display (60 FPS on 60 Hz),
-HDR10 output with calibration. Known: a few seconds of lower frame rate at the
-start of a battle and after some loads (CPU-bound: the game's main thread
-waits on locks its loading threads hold; see `LO_CS_SPIN` below). Discs 2-4
-and long play are untested.
+HDR10 output with calibration. A two-hour session with 40 area loads, battles
+and cutscenes ran without a crash and with the title heap steady at about
+0.5-0.7 GiB. Known: a few seconds at about 70-80 FPS at the start of a battle
+(CPU-bound: the game's main thread waits on locks its loading threads hold;
+see `LO_CS_SPIN` below). Discs 2-4 are untested.
 
 ## What the port changes
 
@@ -28,7 +29,8 @@ and long play are untested.
 | Display | `sce_sys/param.json` declares HDR (`attribute` 0x20000000) and high frame rate and video-out information (`attribute3` 0x44), so the driver offers 119.88 Hz where the TV takes it; the settings menu offers 90/120 FPS only then. HDR10: `ps5/patches/radv-videoout-hdr.patch` (PS5_Mesa `wsi_common_videoout.c`) offers A2B10G10R10/A2R10G10B10 in `HDR10_ST2084` while `sceVideoOutGetOutputStatus` reports HDR (byte 4 = 2, byte 8 bit 0), and registers those swapchains with the PQ formats 0x8100070422000000 / 0x8100070400000000. A console set to HDR "On when supported" keeps its output in HDR10, so a PQ buffer shows as HDR with no mode change. `LO_PS5_VIDEO_PROBE=1` (`os/ps5_video_probe.cpp`) shows SDR and PQ test patterns; `=2` searches the format codes (0x80.. 8-bit, 0x81.. 10-bit) |
 | Menu | rows the console cannot use are hidden and their saved values reset (`settings/menu.cpp` `GraphicsRowHidden`, `SystemRowHidden`; `settings/config.cpp` `Validate`) |
 | Settings | no environment on the console: `LO_*` switches go in `/app0/ps5-env.txt`, one `KEY=VALUE` per line |
-| Diagnostics | `/app0/boot.txt` records each startup step and any early crash (signal, `rip`, stack) before the runtime's log exists |
+| Diagnostics | `/app0/boot.txt` records each startup step and any crash (signal, `rip`, stack, memory figures). The runtime log gets the title heap and free direct memory every 30 s, and at once when C++ blocks of 256 KiB or more change by 256 MiB, with the code holding the most (`os/ps5_alloc_trace.cpp`; `anchor` gives the load bias) |
+| Clears | EDRAM clears queue per target until its next use (`gpu/pending_clear.h`); a rectangle already queued with the same value is skipped and a queue of 256 rectangles runs at once. A target cleared every frame of a cutscene and never drawn used to queue one rectangle per frame, until the replay ran the title out of memory or stalled the GPU |
 | Saves | a title may not call `lstat` (EPERM) or rely on the SDK's `realpath`, so replacing a save slot checks for links with `readlink` and paths lexically (`kernel/xam.cpp`, `FileSystem::IsSymlink`/`RemoveTree`) |
 | Files | the title folder `/app0` (= `/data/homebrew/<TITLE_ID>/`) is the portable install root: settings, saves, logs, caches, `game/` |
 | Network | none yet (`updater/ps5_http.cpp`): no update check, no pack download, no log upload |
@@ -122,6 +124,7 @@ runtime log's first lines list the switches it read.
 | `LO_PROFILE=1` | samples every guest thread each millisecond and logs the busiest threads' states and return addresses once a second, and thread creation every 10 s (`kernel/imports.cpp`) |
 | `LO_CS_SPIN=<n>` | pauses a thread waiting for a guest critical section spins before it sleeps (default 2500, about 50 us; `0` sleeps at once). The console has no futex, so a sleeping waiter wakes slowly (`kernel/critical_section.h`) |
 | `LO_GUEST_CLOCK=0` | the guest clock (`mftb`, `KeTimeStampBundle`) behind one mutex and `clock_gettime`, as before; the default reads the TSC without a lock while the game runs at 1x (`debug/fast_forward.h`) |
+| `LO_PS5_MMAP_THRESHOLD_MB=<n>` | blocks of n MiB or more get a heap segment of their own (dlmalloc's default 256 KiB); the title heap holds at most 1024 segments. Off by default |
 | `LO_PS5_PIN=0/1/2` | guest worker threads kept off the first CPU (1, default), and the main thread held there (2) (`os/ps5_title.cpp`) |
 | `LO_PS5_VIDEO_PROBE=1/2` | the HDR display probe instead of the game |
 | `PS5_VIDEOOUT_HDR=0` | RADV offers no HDR formats |

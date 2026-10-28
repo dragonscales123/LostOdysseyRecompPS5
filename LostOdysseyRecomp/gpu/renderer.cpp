@@ -5462,7 +5462,8 @@ void main()
                         sceneCameraKnown ? temporalScene.Anchor().depthAllocation : 0);
                 }
                 MarkFgWritable(tex, "edram_clear");
-                if (tex.pendingClear.Size() >= pending_clear::Queue::kMaxOps) RunPendingClears(tex);
+                if (tex.pendingClear.Size() >= pending_clear::Queue::kMaxOps ||
+                    tex.pendingClear.RectCount() >= pending_clear::Queue::kMaxRects) RunPendingClears(tex);
                 tex.pendingClear.Record(std::move(op), tex.width, tex.height);
             }
 

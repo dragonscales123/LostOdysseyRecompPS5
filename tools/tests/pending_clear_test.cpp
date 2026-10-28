@@ -32,6 +32,11 @@ void QueueRules()
     // The same value merges its rectangles into the last op.
     q.Record(Color(0.75f, {{8, 0, 12, 4}}), 16, 8);
     assert(q.Size() == 2 && q.Ops()[1].rects.size() == 2);
+    // Recording the same rectangle again (a target cleared every frame and
+    // never drawn) adds nothing, nor does one inside a rectangle it has.
+    for (int frame = 0; frame < 1000; ++frame) q.Record(Color(0.75f, {{0, 0, 4, 4}}), 16, 8);
+    q.Record(Color(0.75f, {{1, 1, 3, 3}}), 16, 8);
+    assert(q.Size() == 2 && q.Ops()[1].rects.size() == 2 && q.RectCount() == 2);
     // A partial clear of the value a whole clear already wrote is redundant.
     Queue same;
     same.Record(Color(0.5f), 16, 8);

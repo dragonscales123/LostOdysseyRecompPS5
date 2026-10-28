@@ -1,5 +1,6 @@
 #include <stdafx.h>
 #include "file_system.h"
+#include <debug/heal_on_save.h>
 #include "disc_set.h"
 #include "io_diagnostics.h"
 #include "file_system_test.h"
@@ -509,6 +510,7 @@ bool FileHandle::PublishSave()
         return false;
     }
     saveDirty = false;
+    debug_menu::NotifySaveWritten();
     return true;
 }
 

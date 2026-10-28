@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <bit>
 #include <cstdint>
 #include <vector>
@@ -59,6 +60,19 @@ public:
     // More than this runs the queue first (the renderer's choice); in practice
     // equal values merge and whole clears drop older ones.
     static constexpr size_t kMaxOps = 8;
+    // Likewise for the rectangles of one op. A target the game clears every
+    // frame and never draws to (seen in cutscenes on the PS5) used to gather
+    // the same rectangle once per frame without limit: hundreds of MiB of
+    // queue, then as much again while replaying it, and the title ran out
+    // of memory.
+    static constexpr size_t kMaxRects = 256;
+
+    size_t RectCount() const
+    {
+        size_t count = 0;
+        for (const auto& op : ops_) count += op.rects.size();
+        return count;
+    }
 
     bool Empty() const { return ops_.empty(); }
     size_t Size() const { return ops_.size(); }
@@ -81,7 +95,15 @@ public:
             // A whole last clear already covers these pixels with this value.
             if (!last.Whole()) {
                 if (op.Whole()) last.rects.clear();
-                else last.rects.insert(last.rects.end(), op.rects.begin(), op.rects.end());
+                else
+                    for (const auto& r : op.rects) {
+                        // A rectangle this op already clears (to the same
+                        // value) changes nothing: skip it.
+                        const bool covered = std::any_of(last.rects.begin(), last.rects.end(), [&](const Rect& o) {
+                            return o.left <= r.left && o.top <= r.top && o.right >= r.right && o.bottom >= r.bottom;
+                        });
+                        if (!covered) last.rects.push_back(r);
+                    }
             }
             Keep(op.rects);
             return;

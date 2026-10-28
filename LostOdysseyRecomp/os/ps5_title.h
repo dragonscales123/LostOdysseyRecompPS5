@@ -4,6 +4,7 @@
 
 #if LO_PLATFORM_PS5
 #include <filesystem>
+#include <string>
 
 // PlayStation 5 homebrew title setup (docs/PS5.md).
 namespace os::ps5
@@ -43,6 +44,14 @@ float SystemHdrPeakNits();
 // core. Call PlaceGuestMainThread on the guest main thread before it runs and
 // PlaceGuestWorkerThread on each other guest thread.
 void PlaceGuestMainThread();
+
+// One log line with the title heap (segments, mapped, peak, libc fallbacks)
+// and the direct memory still free; StartMemoryLog repeats it every 30 s.
+void LogMemory(const char* why);
+void StartMemoryLog();
+// os/ps5_alloc_trace.cpp: C++ blocks of 256 KiB or more, by caller.
+std::string LargeAllocationSummary();
+bool LargeAllocationsGrew(size_t step);
 void PlaceGuestWorkerThread(uint32_t function, uint32_t flags);
 }
 #endif

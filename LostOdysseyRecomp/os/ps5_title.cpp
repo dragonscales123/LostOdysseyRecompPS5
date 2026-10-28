@@ -12,6 +12,8 @@
 #include <ps5platform/context.h>
 #include <ps5platform/fp.h>
 #include <ps5platform/klog.h>
+#include <ps5platform/heap.h>
+#include <ps5platform/kernel.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <atomic>
@@ -29,6 +31,7 @@ extern "C" int sceSystemServiceHideSplashScreen(void);
 extern "C" int sceSystemServiceLoadExec(const char* path, const char* const* argv);
 extern "C" int sceKernelUsleep(uint32_t microseconds);
 extern "C" int sceSystemServiceGetHdrToneMapLuminance(void* luminance);
+extern "C" int mspace_mallopt(int parameter, int value);
 extern "C" int32_t scePthreadGetaffinity(pthread_t thread, uint64_t* mask);
 extern "C" int32_t scePthreadSetaffinity(pthread_t thread, uint64_t mask);
 
@@ -143,6 +146,44 @@ static Placement& GetPlacement()
     });
     return placement;
 }
+}
+
+void LogMemory(const char* why)
+{
+    struct ps5_heap_stats heap{};
+    ps5_heap_stats(&heap);
+    int64_t start = 0;
+    size_t available = 0;
+    const int rc = sceKernelAvailableDirectMemorySize(0, sceKernelGetDirectMemorySize(), 0x10000, &start, &available);
+    char line[320];
+    std::snprintf(line, sizeof(line),
+        "memory (%s): heap mapped=%zu MiB peak=%zu MiB segments=%u arenas=%u libc_fallbacks=%llu; direct memory total=%lld MiB largest_free=%zu MiB (rc=%#x)",
+        why, heap.mapped_bytes >> 20, heap.peak_bytes >> 20, heap.segments, heap.arenas, heap.libc_fallbacks,
+        (long long)(sceKernelGetDirectMemorySize() >> 20), available >> 20, unsigned(rc));
+    const std::string large = LargeAllocationSummary();
+    if (std::strcmp(why, "periodic") == 0) LOG_INFO("{}; {}", line, large);
+    else { Breadcrumb(line); Breadcrumb(large.c_str()); LOG_NOTICE("{}; {}", line, large); }
+}
+
+void StartMemoryLog()
+{
+    // LO_PS5_MMAP_THRESHOLD_MB=<n>: blocks of n MiB and more get a heap
+    // segment of their own (dlmalloc's default is 256 KiB). The title heap
+    // holds at most 1024 segments, so many live blocks over the threshold
+    // can exhaust it while memory is still free.
+    if (const char* env = getenv("LO_PS5_MMAP_THRESHOLD_MB"); env && atoi(env) > 0) {
+        const int rc = mspace_mallopt(-3 /* M_MMAP_THRESHOLD */, atoi(env) << 20);
+        LOG_NOTICE("memory: large-block threshold {} MiB (rc={})", atoi(env), rc);
+    }
+    LogMemory("start");
+    std::thread([] {
+        // Every 30 s, and at once when the large blocks change by 256 MiB.
+        for (unsigned tick = 1;; ++tick) {
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            if (LargeAllocationsGrew(size_t(256) << 20)) LogMemory("jump");
+            else if (tick % 15 == 0) LogMemory("periodic");
+        }
+    }).detach();
 }
 
 void PlaceGuestMainThread()
@@ -286,6 +327,7 @@ static void EarlyCrash(int signal, siginfo_t* info, void* context)
     }
     std::snprintf(line, sizeof(line), "TERMINATE: uncaught %s: %s", type, what);
     os::ps5::Breadcrumb(line);
+    os::ps5::LogMemory("terminate");
     std::abort();
 }
 

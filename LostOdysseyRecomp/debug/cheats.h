@@ -2,7 +2,9 @@
 #include "cheat_data.h"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <mutex>
@@ -174,7 +176,17 @@ class Session {
     Snapshot snapshot;
     Context identity;
     std::optional<Request> pending;
+    // Heal-on-save (debug/heal_on_save.cpp): when the save was written, as
+    // steady-clock milliseconds; 0 when none is waiting. Independent of the
+    // memory-edit switch, and dropped if no field arrives within 30 s.
+    std::atomic<int64_t> saveHealSince{0};
+    static int64_t NowMs() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
 public:
+    void RequestSaveHeal() { saveHealSince.store(NowMs()); }
+    bool SaveHealPending() const { return saveHealSince.load() != 0; }
     Snapshot Get() const { std::lock_guard lock(mutex); return snapshot; }
     void Enable(bool enabled) {
         std::lock_guard lock(mutex); snapshot.enabled = enabled;
@@ -205,7 +217,13 @@ public:
             snapshot.editorRequested = false;
         }
         snapshot.available = available;
+        if (const int64_t since = saveHealSince.load(); since && NowMs() - since > 30000)
+            saveHealSince.store(0);
         if (!available) { pending.reset(); return; }
+        if (saveHealSince.exchange(0)) {
+            Request heal; heal.action = Action::HealParty;
+            if (auto writes = Plan(memory, heal)) Commit(memory, *writes);
+        }
         if (pending) {
             const auto r = *pending; pending.reset();
             if (!snapshot.enabled || r.generation != snapshot.generation) snapshot.result = Result::Cancelled;
