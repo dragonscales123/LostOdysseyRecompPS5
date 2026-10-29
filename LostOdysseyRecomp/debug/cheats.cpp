@@ -94,11 +94,24 @@ void Tick(PPCContext& ctx, uint8_t* base) {
         if (heal.serial != reported) {
             reported = heal.serial;
             if (heal.outcome == Session::SaveHealApplied)
-                LOG_INFO("heal on save: party restored (first member HP {} -> {} of {})", heal.hpBefore, heal.hpAfter, heal.maxHp);
+                LOG_INFO("heal on save: party restored{} (first member HP {} -> {} of {})",
+                    heal.partyOnly ? " by the party check" : "", heal.hpBefore, heal.hpAfter, heal.maxHp);
             else if (heal.outcome == Session::SaveHealInvalid)
                 LOG_WARNING("heal on save: party data did not validate; nothing written (first member HP {} of {})", heal.hpBefore, heal.maxHp);
             else
                 LOG_WARNING("heal on save: no playable field within 5 minutes of the save; skipped");
+        }
+    }
+    // Still waiting after this tick: say why, every 20 s of game time.
+    if (session.SaveHealPending()) {
+        static uint64_t nextReason = 0;
+        if (now >= nextReason) {
+            nextReason = now + 20000;
+            float detail = 0;
+            const char* why = !field ? "not on the field"
+                : !context.world ? "no world" : !context.level ? "no level" : !context.root ? "no play data"
+                : ValidateFailure(memory, &detail);
+            LOG_INFO("heal on save: waiting (scene={} reason={} value={})", scene, why ? why : "validates", detail);
         }
     }
     const auto current = session.Get();

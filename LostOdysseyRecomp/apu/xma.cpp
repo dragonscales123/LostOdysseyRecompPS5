@@ -390,6 +390,15 @@ namespace apu::xma
                 {
                     // Not starvation: every frame we send is complete, so a
                     // receive EAGAIN means the decoder dropped this frame.
+                    // The frame lengths after a rejected frame cannot be trusted:
+                    // resume at the next packet, whose header gives its first
+                    // frame, and drop the decoder's overlap state. Otherwise one
+                    // misparse can reject thousands of frames while the guest
+                    // waits on this context.
+                    ctx.copiedBits = ctx.frameBits = 0;
+                    ctx.frameCrossedPacket = false;
+                    if (data.inputReadOffset() / kBitsPerPacket == packetIndex) nextPacket();
+                    avcodec_flush_buffers(ctx.decoder);
                     if (g_audioDiagnostics) ++ctx.decodeErrors;
                     // Serialized by g_mutex; context reuse must not reset the
                     // process-wide capture budget or hide later scene failures.
@@ -454,6 +463,16 @@ namespace apu::xma
                             }
                         }
                     }
+                    // Output a frame of silence in its place, as the hardware
+                    // keeps producing output: a voice that yields nothing never
+                    // drains, and the guest's audio thread waits on it while
+                    // holding the lock the game's main thread needs.
+                    const uint32_t silentChannels = data.isStereo() ? 2 : 1;
+                    std::fill_n(ctx.pcm.begin(), 512 * silentChannels * 2, uint8_t(0));
+                    const uint32_t silentSkip = std::min(4u, data.skipCount());
+                    data.setSkipCount(data.skipCount() - silentSkip);
+                    ctx.pcmOffset = silentSkip * 256 * silentChannels;
+                    ctx.remainingSubframes = 4 - silentSkip;
                     return;
                 }
                 const uint32_t channels = data.isStereo() ? 2 : 1;
@@ -513,6 +532,13 @@ namespace apu::xma
             if (ctx.hasPublishedInputOffset && data.inputReadOffset() != ctx.publishedInputOffset)
             {
                 ctx.packetsSkip = 0;
+                // A frame half-copied from the old position belongs to the old
+                // stream: finishing it with bits from the new one misreads every
+                // frame length after it, and the decoder rejects frames until a
+                // packet happens to resynchronise.
+                ctx.copiedBits = ctx.frameBits = 0;
+                ctx.frameCrossedPacket = false;
+                if (ctx.decoder) avcodec_flush_buffers(ctx.decoder);
                 if (g_audioDiagnostics) ++ctx.explicitSeeks;
             }
 
@@ -523,6 +549,10 @@ namespace apu::xma
                 LOG_WARNING("xma: context {} has an output ring of {} bytes", id, ring.capacity);
                 return;
             }
+            // Match RingBuffer cursor setters: both guest offsets wrap within
+            // the configured ring before free-space accounting or any write.
+            ring.read %= ring.capacity;
+            ring.write %= ring.capacity;
             ctx.freeBlocks = int32_t(ring.WriteCount() / kOutputBytesPerBlock);
             const int32_t minimumBlocks = data.isStereo() ? 2 : 1;
             if (minimumBlocks > ctx.freeBlocks)

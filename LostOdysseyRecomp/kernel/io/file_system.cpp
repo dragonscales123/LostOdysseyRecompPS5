@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <limits>
+#include <atomic>
 #include <mutex>
 #include <os/platform.h>
 #include <unistd.h>
@@ -114,6 +115,10 @@ namespace
     std::filesystem::path g_discRoot;
     DiscSet::Identity g_discIdentity;
     std::mutex g_discMutex;
+    // Bumped by each disc change. Read-only handles opened on an earlier disc
+    // follow the change on their next use, as handles on the console's drive
+    // read whichever disc is inserted.
+    std::atomic<uint32_t> g_discGeneration{0};
     std::filesystem::path g_saveRoot;
     std::filesystem::path g_cacheRoot;
 #if LO_PLATFORM_ANDROID || defined(LO_STORAGE_TESTING)
@@ -243,6 +248,10 @@ struct FileHandle : KernelObject
     std::shared_ptr<void> cachePin; // overflow archive's cache set, until this handle closes
     uint64_t fileSize = 0;
     bool writable = false;
+    // A read-only file on the game disc: its path below the disc root and the
+    // disc generation it was opened on (g_discGeneration).
+    std::filesystem::path discRelative;
+    uint32_t discGeneration = 0;
     // Writable save file: synced to disk before it closes.
     bool durable = false;
     // Android shared storage must never expose an in-place, partial save.bin.
@@ -314,6 +323,7 @@ bool FileSystem::SelectDisc(uint32_t discNumber)
         trace.SetStage(io_diagnostics::Stage::DiscSelectEnd);
         return false;
     }
+    if (target != g_discRoot) g_discGeneration.fetch_add(1);
     g_discRoot = target;
     trace.SetResult(0);
     trace.SetStage(io_diagnostics::Stage::DiscSelectEnd);
@@ -852,6 +862,16 @@ static uint32_t OpenFileHandle(be<uint32_t>* FileHandleOut, uint32_t DesiredAcce
             handle->ranges = modding::text_overlay::RangesFor(hostPath);
             for (const auto &range : handle->ranges)
                 handle->size = std::max<uint64_t>(handle->size, range.offset + range.size);
+            if (!handle->cachePin)
+            {
+                const uint32_t generation = g_discGeneration.load();
+                const auto relative = hostPath.lexically_normal().lexically_relative(FileSystem::GetDiscRoot().lexically_normal());
+                if (!relative.empty() && *relative.begin() != "..")
+                {
+                    handle->discRelative = relative;
+                    handle->discGeneration = generation;
+                }
+            }
         }
     }
 
@@ -920,6 +940,39 @@ static uint32_t ReadWithRanges(FileHandle& handle, uint64_t offset, uint8_t* out
     return STATUS_SUCCESS;
 }
 
+// A read-only disc file opened before the last disc change reads the same
+// file on the new disc (the guest keeps streaming handles, such as the music
+// archive, open across the change). Called with the handle's ioMutex held.
+static void FollowDiscChange(FileHandle& handle)
+{
+    if (handle.discRelative.empty() || handle.discGeneration == g_discGeneration.load()) return;
+    const uint32_t generation = g_discGeneration.load();
+    handle.discGeneration = generation;
+    const auto target = FileSystem::GetDiscRoot() / handle.discRelative;
+    std::error_code ec;
+    if (target == handle.path || !std::filesystem::is_regular_file(target, ec)) return;
+#ifdef _WIN32
+    FILE* file = _wfopen(target.c_str(), L"rb");
+#else
+    FILE* file = fopen(target.c_str(), "rb");
+#endif
+    if (!file)
+    {
+        LOG_WARNING("disc change: could not reopen '{}' on the new disc", FileSystem::PathUtf8(target));
+        return;
+    }
+    fclose(handle.file);
+    handle.file = file;
+    handle.path = target;
+    _fseeki64(file, 0, SEEK_END);
+    handle.size = handle.fileSize = uint64_t(_ftelli64(file));
+    _fseeki64(file, 0, SEEK_SET);
+    handle.ranges = modding::text_overlay::RangesFor(target);
+    for (const auto& range : handle.ranges)
+        handle.size = std::max<uint64_t>(handle.size, range.offset + range.size);
+    LOG_INFO("disc change: open handle now reads '{}' ({} bytes)", FileSystem::PathUtf8(target), handle.size);
+}
+
 uint32_t NtReadFile(uint32_t handleValue, uint32_t Event, uint32_t ApcRoutine, uint32_t ApcContext,
     XIO_STATUS_BLOCK* IoStatusBlock, void* Buffer, uint32_t Length, be<uint64_t>* ByteOffset)
 {
@@ -938,6 +991,7 @@ uint32_t NtReadFile(uint32_t handleValue, uint32_t Event, uint32_t ApcRoutine, u
     {
         FileIoLock ioLock(handle->ioMutex, trace, handleValue);
         IO_TEST_STAGE(IoLockAcquired, handleValue);
+        FollowDiscChange(*handle);
         offset = handle->position;
         if (ByteOffset)
         {
@@ -1101,6 +1155,7 @@ uint32_t NtQueryInformationFile(uint32_t handleValue, XIO_STATUS_BLOCK* IoStatus
 
     trace.Acquired(handle->diagnostic, &handle->ioMutex, handle->path, handle.get());
     FileIoLock ioLock(handle->ioMutex, trace);
+    if (handle->file) FollowDiscChange(*handle);
 
     uint32_t info = 0;
     uint32_t status = STATUS_SUCCESS;
@@ -1493,6 +1548,7 @@ uint32_t NtReadFileScatter(uint32_t handleValue, uint32_t Event, uint32_t ApcRou
     uint32_t status = STATUS_SUCCESS;
     {
         FileIoLock ioLock(handle->ioMutex, trace);
+        FollowDiscChange(*handle);
         uint64_t offset = handle->position;
         if (ByteOffset && uint64_t(*ByteOffset) != 0xFFFFFFFFFFFFFFFEull)
             offset = *ByteOffset;

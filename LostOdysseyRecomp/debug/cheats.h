@@ -35,7 +35,41 @@ struct Context {
     bool operator==(const Context&) const = default;
 };
 inline bool InRange(float f, float maximum) { return std::isfinite(f) && f >= 0 && f <= maximum; }
-inline bool Validate(Memory m) {
+// The first check the play data fails, or nullptr when it validates.
+// detail receives the offending value for the log.
+inline const char* ValidateFailure(Memory m, float* detail = nullptr) {
+    auto fail = [&](const char* why, float value) { if (detail) *detail = value; return why; };
+    if (m.bytes.size() < data::DataSize) return fail("play data too small", float(m.bytes.size()));
+    if (m.U32(Gold) > 999999999u) return fail("gold out of range", float(m.U32(Gold)));
+    unsigned members = 0, seen = 0;
+    for (unsigned i = 0; i < 5; ++i) {
+        const auto id = m.U32(Party + i*4);
+        if (id == UINT32_MAX) continue;
+        if (id >= 9) return fail("party slot holds an unknown character id", float(id));
+        if (seen & (1u << id)) return fail("party lists a character twice", float(id));
+        if (!m.Character(id)) return fail("party member has no max HP", float(id));
+        seen |= 1u << id; ++members;
+    }
+    if (!members) return fail("party is empty", 0);
+    for (unsigned i = 0; i < 9; ++i) {
+        const auto b = i * data::CharacterStride;
+        const auto hp = m.F32(Hp+b), maxHp = m.F32(MaxHp+b);
+        const auto mp = m.F32(Mp+b), maxMp = m.F32(MaxMp+b);
+        if (!InRange(maxHp, 1000000)) return fail("character max HP out of range", float(i));
+        if (!InRange(maxMp, 1000000)) return fail("character max MP out of range", float(i));
+        if (!InRange(hp, maxHp)) return fail("character HP above max", float(i));
+        if (!InRange(mp, maxMp)) return fail("character MP above max", float(i));
+        if (!InRange(m.F32(Exp+b), 100)) return fail("character exp field out of range", float(i));
+    }
+    for (const auto& e : data::Items) if (!InRange(m.F32(e.value), 9999)) return fail("item count out of range", m.F32(e.value));
+    for (const auto& e : data::Materials) if (!InRange(m.F32(e.value), 9999)) return fail("material count out of range", m.F32(e.value));
+    return nullptr;
+}
+inline bool Validate(Memory m) { return ValidateFailure(m) == nullptr; }
+// Narrower check for healing alone: the party list and each member's HP and MP.
+// Healing writes only those members' HP and MP, so the rest of the play data
+// (other characters, items) need not match the full editor's expectations.
+inline bool ValidateParty(Memory m) {
     if (m.bytes.size() < data::DataSize || m.U32(Gold) > 999999999u) return false;
     unsigned members = 0, seen = 0;
     for (unsigned i = 0; i < 5; ++i) {
@@ -43,18 +77,12 @@ inline bool Validate(Memory m) {
         if (id == UINT32_MAX) continue;
         if (id >= 9 || (seen & (1u << id)) || !m.Character(id)) return false;
         seen |= 1u << id; ++members;
-    }
-    if (!members) return false;
-    for (unsigned i = 0; i < 9; ++i) {
-        const auto b = i * data::CharacterStride;
-        const auto hp = m.F32(Hp+b), maxHp = m.F32(MaxHp+b);
-        const auto mp = m.F32(Mp+b), maxMp = m.F32(MaxMp+b);
+        const auto b = id * data::CharacterStride;
+        const auto maxHp = m.F32(MaxHp+b), maxMp = m.F32(MaxMp+b);
         if (!InRange(maxHp, 1000000) || !InRange(maxMp, 1000000) ||
-            !InRange(hp, maxHp) || !InRange(mp, maxMp) || !InRange(m.F32(Exp+b), 100)) return false;
+            !InRange(m.F32(Hp+b), 1000000) || !InRange(m.F32(Mp+b), 1000000)) return false;
     }
-    for (const auto& e : data::Items) if (!InRange(m.F32(e.value), 9999)) return false;
-    for (const auto& e : data::Materials) if (!InRange(m.F32(e.value), 9999)) return false;
-    return true;
+    return members != 0;
 }
 enum class Action { AddGold, SetGold, Heal, HealParty, SetExp, Item, Material,
     AllItems, AllMaterials, LearnSkill, LearnSupportedSkills, SetWeapon, SetRing,
@@ -171,7 +199,7 @@ struct Snapshot {
     std::array<uint32_t,5> party{UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX};
 };
 // What became of the last heal-on-save request, for the log (debug/cheats.cpp).
-struct SaveHealReport { uint32_t serial = 0; int outcome = 0; float hpBefore = 0, hpAfter = 0, maxHp = 0; };
+struct SaveHealReport { uint32_t serial = 0; int outcome = 0; float hpBefore = 0, hpAfter = 0, maxHp = 0; bool partyOnly = false; };
 // UI owns only requests and by-value snapshots; Tick is the only guest writer.
 class Session {
     mutable std::mutex mutex;
@@ -228,7 +256,27 @@ public:
             saveHealSince.store(0);
             saveHealReport = {saveHealReport.serial + 1, SaveHealExpired};
         }
-        if (!available) { pending.reset(); return; }
+        if (!available) {
+            pending.reset();
+            // The full editor check can fail on data healing never touches;
+            // heal the party when its own entries are sound.
+            if (field && context.root && context.world && context.level && saveHealSince.load() && ValidateParty(memory)) {
+                saveHealSince.store(0);
+                const uint32_t first = memory.U32(Party);
+                const uint32_t b = first < 9 ? first * data::CharacterStride : 0;
+                SaveHealReport report{saveHealReport.serial + 1, SaveHealApplied, memory.F32(Hp+b), 0, memory.F32(MaxHp+b)};
+                for (unsigned i = 0; i < 5; ++i) {
+                    const auto n = memory.U32(Party + i*4);
+                    if (n >= 9) continue;
+                    const auto o = n * data::CharacterStride;
+                    Commit(memory, std::vector<Write>{{Hp+o, memory.U32(MaxHp+o), 4}, {Mp+o, memory.U32(MaxMp+o), 4}});
+                }
+                report.hpAfter = memory.F32(Hp+b);
+                report.partyOnly = true;
+                saveHealReport = report;
+            }
+            return;
+        }
         if (saveHealSince.exchange(0)) {
             Request heal; heal.action = Action::HealParty;
             const uint32_t first = memory.U32(Party);
