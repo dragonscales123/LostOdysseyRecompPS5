@@ -3,6 +3,7 @@
 #include <os/logger.h>
 #include <settings/config.h>
 #include <atomic>
+#include <chrono>
 
 namespace
 {
@@ -28,6 +29,11 @@ void debug_menu::SetHealOnSaveEnabled(bool enabled)
 
 void debug_menu::NotifySaveWritten()
 {
-    if (HealOnSaveEnabled())
-        cheats::session.RequestSaveHeal();
+    if (!HealOnSaveEnabled()) return;
+    // A save writes several times; log the first of each burst.
+    static std::atomic<int64_t> last{0};
+    const int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (now - last.exchange(now) > 5) LOG_INFO("heal on save: save written; party HP/MP restore queued for the field");
+    cheats::session.RequestSaveHeal();
 }

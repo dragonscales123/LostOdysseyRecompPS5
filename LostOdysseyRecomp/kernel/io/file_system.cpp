@@ -525,6 +525,10 @@ FileHandle::~FileHandle()
         }
         else if (durable && !FileSystem::SyncFile(file))
             LOG_WARNING("could not sync save file '{}'", FileSystem::PathUtf8(path));
+        else if (durable && writable)
+            // Saves written in place (every platform but shared-save Android)
+            // finish when the game closes the file.
+            debug_menu::NotifySaveWritten();
         fclose(file);
     }
     if (!saveWorkingPath.empty())

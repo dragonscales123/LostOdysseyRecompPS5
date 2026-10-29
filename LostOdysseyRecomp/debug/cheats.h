@@ -170,6 +170,8 @@ struct Snapshot {
     std::array<CharacterState,9> characters{};
     std::array<uint32_t,5> party{UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX};
 };
+// What became of the last heal-on-save request, for the log (debug/cheats.cpp).
+struct SaveHealReport { uint32_t serial = 0; int outcome = 0; float hpBefore = 0, hpAfter = 0, maxHp = 0; };
 // UI owns only requests and by-value snapshots; Tick is the only guest writer.
 class Session {
     mutable std::mutex mutex;
@@ -178,8 +180,9 @@ class Session {
     std::optional<Request> pending;
     // Heal-on-save (debug/heal_on_save.cpp): when the save was written, as
     // steady-clock milliseconds; 0 when none is waiting. Independent of the
-    // memory-edit switch, and dropped if no field arrives within 30 s.
+    // memory-edit switch, and dropped if no field arrives within 5 minutes.
     std::atomic<int64_t> saveHealSince{0};
+    SaveHealReport saveHealReport;
     static int64_t NowMs() {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -187,6 +190,8 @@ class Session {
 public:
     void RequestSaveHeal() { saveHealSince.store(NowMs()); }
     bool SaveHealPending() const { return saveHealSince.load() != 0; }
+    enum { SaveHealApplied = 1, SaveHealInvalid = 2, SaveHealExpired = 3 };
+    SaveHealReport LastSaveHeal() const { std::lock_guard lock(mutex); return saveHealReport; }
     Snapshot Get() const { std::lock_guard lock(mutex); return snapshot; }
     void Enable(bool enabled) {
         std::lock_guard lock(mutex); snapshot.enabled = enabled;
@@ -217,12 +222,21 @@ public:
             snapshot.editorRequested = false;
         }
         snapshot.available = available;
-        if (const int64_t since = saveHealSince.load(); since && NowMs() - since > 30000)
+        // A save made in a menu heals once the field is back; give up after
+        // five minutes without one (a load or a title return in between).
+        if (const int64_t since = saveHealSince.load(); since && NowMs() - since > 300000) {
             saveHealSince.store(0);
+            saveHealReport = {saveHealReport.serial + 1, SaveHealExpired};
+        }
         if (!available) { pending.reset(); return; }
         if (saveHealSince.exchange(0)) {
             Request heal; heal.action = Action::HealParty;
-            if (auto writes = Plan(memory, heal)) Commit(memory, *writes);
+            const uint32_t first = memory.U32(Party);
+            const uint32_t b = first < 9 ? first * data::CharacterStride : 0;
+            SaveHealReport report{saveHealReport.serial + 1, SaveHealInvalid, memory.F32(Hp+b), 0, memory.F32(MaxHp+b)};
+            if (auto writes = Plan(memory, heal)) { Commit(memory, *writes); report.outcome = SaveHealApplied; }
+            report.hpAfter = memory.F32(Hp+b);
+            saveHealReport = report;
         }
         if (pending) {
             const auto r = *pending; pending.reset();

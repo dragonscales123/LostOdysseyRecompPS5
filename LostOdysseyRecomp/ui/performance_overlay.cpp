@@ -1,4 +1,5 @@
 #include <stdafx.h>
+#include <lo_build_revision.h>
 #include "performance_overlay.h"
 #include "text_raster.h"
 #include <gpu/gpu_busy.h>
@@ -317,6 +318,11 @@ void Draw(const Values& values, const Sources& sources) {
         row.Label("GPU", kLoadLabel);
         row.Value(Percent(values.gpu));
         row.Unit("%");
+#ifdef LO_PS5_BUILD
+        row.Divider();
+        row.Label("PS5", kBackendLabel);
+        row.Value(Ascii("b" LO_PS5_BUILD), kWhite, true);
+#endif
     } else {
         // The frame rate alone in a block at the top-left corner.
         const auto fps = Number(values.fps, 0), ms = Number(values.frameMs, 1);
@@ -328,6 +334,9 @@ void Draw(const Values& values, const Sources& sources) {
         row.Unit("FPS");
         row.Value(ms);
         row.Unit("ms");
+#ifdef LO_PS5_BUILD
+        row.Unit("b" LO_PS5_BUILD);
+#endif
         const uint32_t used = std::min<uint32_t>(image.width, uint32_t(std::lround(row.X() + 4 * s)));
         // Background behind the text only, then crop to it.
         std::vector<uint32_t> block(size_t(used) * image.height, kBackground);

@@ -1,5 +1,6 @@
 #include <stdafx.h>
 #include "cheats.h"
+#include <os/logger.h>
 #include "fast_forward.h"
 #include "menu_overlay.h"
 #include <kernel/memory.h>
@@ -87,6 +88,19 @@ void Tick(PPCContext& ctx, uint8_t* base) {
         }
     }
     session.Tick(context, memory, field);
+    {
+        static uint32_t reported = 0;
+        const auto heal = session.LastSaveHeal();
+        if (heal.serial != reported) {
+            reported = heal.serial;
+            if (heal.outcome == Session::SaveHealApplied)
+                LOG_INFO("heal on save: party restored (first member HP {} -> {} of {})", heal.hpBefore, heal.hpAfter, heal.maxHp);
+            else if (heal.outcome == Session::SaveHealInvalid)
+                LOG_WARNING("heal on save: party data did not validate; nothing written (first member HP {} of {})", heal.hpBefore, heal.maxHp);
+            else
+                LOG_WARNING("heal on save: no playable field within 5 minutes of the save; skipped");
+        }
+    }
     const auto current = session.Get();
     ApplyEditor(base, current.enabled && current.available && current.editorRequested);
 }
