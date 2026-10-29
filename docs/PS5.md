@@ -1,20 +1,21 @@
 # PlayStation 5 (homebrew)
 
-An experimental native port for a PS5 that runs homebrew titles. It renders
+A native port, now in beta, for a PS5 that runs homebrew titles. It renders
 through Mihawk's [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) (Mesa's
 RADV built for the console and linked into the title) and builds with the
 [PS5 payload SDK](https://github.com/ps5-payload-dev/sdk) as forked by
 [PS5_PayloadSDK](https://github.com/mihawk-99/PS5_PayloadSDK). No game data,
 Sony code or console firmware is involved; supply your own disc files.
 
-Status (2026-10-27, one console, firmware 13.60, USA/Europe discs): boots to
-the title menu, plays movies, field and battles render fully, saves and
-overwrites saves. 120 FPS at 2560x1440 on a 120 Hz display (60 FPS on 60 Hz),
-HDR10 output with calibration. A two-hour session with 40 area loads, battles
-and cutscenes ran without a crash and with the title heap steady at about
-0.5-0.7 GiB. Known: a few seconds at about 70-80 FPS at the start of a battle
-(CPU-bound: the game's main thread waits on locks its loading threads hold;
-see `LO_CS_SPIN` below). Discs 2-4 are untested.
+Status (beta, build 42, 2026-10-29, one console, firmware 13.60, USA/Europe
+discs): boots to the title menu, plays movies, field and battles render fully,
+saves and overwrites saves, changes from disc 1 to disc 2. 120 FPS at
+2560x1440 on a 120 Hz display (60 FPS on 60 Hz), HDR10 output with
+calibration. Multi-hour sessions on discs 1 and 2 with many area loads,
+battles and cutscenes ran without a crash or freeze, with the title heap
+steady at about 0.5-0.7 GiB. Known: a few seconds at about 70-80 FPS at the
+start of a battle (CPU-bound: the game's main thread waits on locks its
+loading threads hold; see `LO_CS_SPIN` below). Discs 3 and 4 are untested.
 
 ## What the port changes
 
@@ -31,6 +32,8 @@ see `LO_CS_SPIN` below). Discs 2-4 are untested.
 | Settings | no environment on the console: `LO_*` switches go in `/app0/ps5-env.txt`, one `KEY=VALUE` per line |
 | Diagnostics | `/app0/boot.txt` records each startup step and any crash (signal, `rip`, stack, memory figures). The runtime log gets the title heap and free direct memory every 30 s, and at once when C++ blocks of 256 KiB or more change by 256 MiB, with the code holding the most (`os/ps5_alloc_trace.cpp`; `anchor` gives the load bias) |
 | Clears | EDRAM clears queue per target until its next use (`gpu/pending_clear.h`); a rectangle already queued with the same value is skipped and a queue of 256 rectangles runs at once. A target cleared every frame of a cutscene and never drawn used to queue one rectangle per frame, until the replay ran the title out of memory or stalled the GPU |
+| Audio | a frame the XMA decoder rejects yields a frame of silence, and parsing resumes at the next packet (`apu/xma.cpp`). A voice that produced nothing never drained, and the guest's audio thread waited on it while holding a lock the main thread needs: 20-80 s freezes on some disc 2 area changes |
+| Disc changes | a read-only disc file opened before `XamSwapDisc` reads the same file on the new disc on its next use (`kernel/io/file_system.cpp` `FollowDiscChange`); the guest keeps some archives open across the change |
 | Saves | a title may not call `lstat` (EPERM) or rely on the SDK's `realpath`, so replacing a save slot checks for links with `readlink` and paths lexically (`kernel/xam.cpp`, `FileSystem::IsSymlink`/`RemoveTree`) |
 | Files | the title folder `/app0` (= `/data/homebrew/<TITLE_ID>/`) is the portable install root: settings, saves, logs, caches, `game/` |
 | Network | none yet (`updater/ps5_http.cpp`): no update check, no pack download, no log upload |

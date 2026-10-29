@@ -6,7 +6,7 @@
 
 **A native port of Lost Odyssey for the PS5.**
 
-An experimental homebrew build of [LostOdysseyRecomp](https://github.com/freefrank/LostOdysseyRecomp) for PlayStation 5 consoles that run homebrew titles.
+A homebrew build of [LostOdysseyRecomp](https://github.com/freefrank/LostOdysseyRecomp) for PlayStation 5 consoles that run homebrew titles. **Now in beta.**
 
 ### [Download](https://github.com/dragonscales123/LostOdysseyRecompPS5/releases) · [Install guide](#getting-started) · [Upstream project](https://github.com/freefrank/LostOdysseyRecomp) · [License: GPL-3.0](LICENSE)
 
@@ -20,19 +20,34 @@ You need your own copy of the game. This repository contains no game data, no sh
 
 ## Status
 
-Experimental. Tested on one console (firmware 13.60) with the USA/Europe four-disc set.
+**Beta** (build 42). The port has moved from alpha to beta: everything needed to play is in place, and every crash and freeze found so far is fixed. What is left is testing on more consoles and the later discs, so bug reports are the most useful help right now ([how to report](#reporting-a-bug)).
+
+Tested on one console (firmware 13.60) with the USA/Europe four-disc set.
 
 | Area | State |
 | :--- | :--- |
 | Boot, menus, movies | Working |
 | Field and battles | Working, rendered fully |
 | Saves | Saving and overwriting work |
+| Disc changes | Disc 1 to disc 2 works, in play and when loading a disc 2 save |
 | Frame rate | 120 FPS at 2560x1440 on a 120 Hz display, 60 FPS on 60 Hz |
-| HDR | HDR10 output with peak-brightness calibration (needs the RADV patch) |
+| HDR | HDR10 output with peak-brightness calibration |
 | Controller | DualSense, with PlayStation button prompts |
+| Long play | Multi-hour sessions on discs 1 and 2 with many area loads, battles and cutscenes, without a crash or freeze |
 | Known issues | A few seconds at about 70-80 FPS at the start of a battle |
-| Long play | A two-hour session with many area loads and cutscenes ran without a crash |
-| Untested | Discs 2-4 |
+| Untested | Discs 3 and 4 |
+
+### What changed from alpha to beta
+
+- **Crashes in long cutscenes fixed.** Some cutscenes piled up repeated screen clears until the console ran out of memory (error, then the home screen) or the graphics chip stalled.
+- **Freezes on disc 2 fixed.** Moving between some areas (for example from the Sorcerer's Shrine back to the Crimson Forest) or starting some battles froze the game for 20-80 seconds while the audio decoder rejected sound data. Unreadable sound data now plays as a moment of silence instead.
+- **Disc changes:** files the game keeps open while switching discs now read from the new disc, as on the console's drive.
+- **Smoother battles:** fewer frame-rate drops in battle, from a faster game clock and lock handling.
+- **HDR calibration** uses the console's own HDR brightness setting when the display reports none.
+- **Restore HP / MP on save** (new, optional): refills the party after every save, on every disc.
+- **Build number on the stats overlay**, so reports can say which build was running.
+- **Audio:** includes the upstream fix for XMA output buffer handling.
+- **Diagnostics:** memory use in the log and in crash reports.
 
 ## Getting started
 
@@ -54,9 +69,16 @@ You don't need to compile anything. The only things you add yourself are the sha
 
 - **120 FPS:** use a 120 Hz display and choose 120 in Graphics → Frame rate.
 - **HDR:** set the PS5 to HDR "On when supported", then turn on HDR in Graphics.
-- **Bug reports:** logs are in `/data/homebrew/PPSA99212/logs/` (start-up steps in `boot.txt`). Please attach the newest one.
 - **Restore HP / MP on save:** press **L1+R1** for the debug menu, open **Cheats**, and turn it on in Quick tools. The party's HP and MP refill after every save.
 - **Optional switches** go in `ps5-env.txt` next to `eboot.bin`; [docs/PS5.md](docs/PS5.md#switches-ps5-envtxt) lists them.
+
+### Reporting a bug
+
+Open an issue and attach:
+
+- the newest log from `/data/homebrew/PPSA99212/logs/`,
+- `/data/homebrew/PPSA99212/boot.txt` if the game crashed or went back to the home screen,
+- the build number from the stats overlay (Graphics → Performance overlay), and which disc and area you were in.
 
 ### Building from source
 
