@@ -20,7 +20,7 @@ You need your own copy of the game. This repository contains no game data, no sh
 
 ## Status
 
-**Beta** (build 42). The port has moved from alpha to beta: everything needed to play is in place, and every crash and freeze found so far is fixed. What is left is testing on more consoles and the later discs, so bug reports are the most useful help right now ([how to report](#reporting-a-bug)).
+**Beta** (build 47, [v0.2.0-beta.3](https://github.com/dragonscales123/LostOdysseyRecompPS5/releases/latest)), based on LostOdysseyRecomp **v1.1.0**. The port has moved from alpha to beta: everything needed to play is in place, and every crash and freeze found so far is fixed. What is left is testing on more consoles and the later discs, so bug reports are the most useful help right now ([how to report](#reporting-a-bug)).
 
 Tested on one console (firmware 13.60) with the USA/Europe four-disc set.
 
@@ -33,9 +33,17 @@ Tested on one console (firmware 13.60) with the USA/Europe four-disc set.
 | Frame rate | 120 FPS at 2560x1440 on a 120 Hz display, 60 FPS on 60 Hz |
 | HDR | HDR10 output with peak-brightness calibration |
 | Controller | DualSense, with PlayStation button prompts |
+| Settings menu | The original game's menu look, HD and European fonts, more languages and button icon sets (from upstream v1.1.0) |
+| Cheats | Debug menu cheats (L1+R1), including Restore HP / MP on save; items given with the cheats show up in the item menu and the sell screen |
 | Long play | Multi-hour sessions on discs 1 and 2 with many area loads, battles and cutscenes, without a crash or freeze |
 | Known issues | A few seconds at about 70-80 FPS at the start of a battle |
 | Untested | Discs 3 and 4 |
+
+### Latest: build 47
+
+- **Updated to LostOdysseyRecomp v1.1.0:** the settings menu gets the original game's look, game-style button icons with more icon sets, HD and European fonts, four more European languages and a Scene fades option. The renderer gets Vulkan stability fixes and resets occlusion on each map load.
+- **Cheat items now show up properly.** The item menu and the sell screen list only the items on the game's held-item list, which the item cheats never updated, so a cheat-given item could be counted but not shown. Item cheats now keep that list in step. If an item went missing this way, set its quantity again from the cheat menu.
+- **Cheat menu:** the second "Healing Herb" entry is now named Healing Tank.
 
 ### What changed from alpha to beta
 
@@ -70,6 +78,7 @@ You don't need to compile anything. The only things you add yourself are the sha
 - **120 FPS:** use a 120 Hz display and choose 120 in Graphics → Frame rate.
 - **HDR:** set the PS5 to HDR "On when supported", then turn on HDR in Graphics.
 - **Restore HP / MP on save:** press **L1+R1** for the debug menu, open **Cheats**, and turn it on in Quick tools. The party's HP and MP refill after every save.
+- **Missing cheat items:** if an item you gave yourself with an older build doesn't show in your item menu, set its quantity again from the cheat menu.
 - **Optional switches** go in `ps5-env.txt` next to `eboot.bin`; [docs/PS5.md](docs/PS5.md#switches-ps5-envtxt) lists them.
 
 ### Reporting a bug

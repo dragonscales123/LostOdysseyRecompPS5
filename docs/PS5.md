@@ -7,7 +7,7 @@ RADV built for the console and linked into the title) and builds with the
 [PS5_PayloadSDK](https://github.com/mihawk-99/PS5_PayloadSDK). No game data,
 Sony code or console firmware is involved; supply your own disc files.
 
-Status (beta, build 42, 2026-10-29, one console, firmware 13.60, USA/Europe
+Status (beta, build 47 on LostOdysseyRecomp v1.1.0, 2026-11-01, one console, firmware 13.60, USA/Europe
 discs): boots to the title menu, plays movies, field and battles render fully,
 saves and overwrites saves, changes from disc 1 to disc 2. 120 FPS at
 2560x1440 on a 120 Hz display (60 FPS on 60 Hz), HDR10 output with
