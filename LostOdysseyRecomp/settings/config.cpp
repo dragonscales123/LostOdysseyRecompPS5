@@ -56,7 +56,7 @@ Config Validate(Config value)
     value.vibrationPercent = std::min(value.vibrationPercent, 100u);
     value.audioMatrixRear = std::clamp((value.audioMatrixRear + 5) / 10 * 10, 90u, 150u);
     value.voiceVolume = std::min(value.voiceVolume, 100u);
-    if (value.buttonPrompts > 2) value.buttonPrompts = 0;
+    if (value.buttonPrompts > 5) value.buttonPrompts = 0;
     if (value.performanceOverlay > 2) value.performanceOverlay = 0;
     value.controllerMap = hid::input_map::ValidController(value.controllerMap);
     value.keyboardMap = hid::input_map::ValidKeyboard(value.keyboardMap);
@@ -106,7 +106,7 @@ Config Validate(Config value)
         value.fastForwardRate = 2;
     if (std::find(std::begin(MenuAnimationRates), std::end(MenuAnimationRates), value.menuAnimationRate) == std::end(MenuAnimationRates))
         value.menuAnimationRate = 1;
-    if (value.uiLanguage > 4)
+    if (value.uiLanguage >= std::size(UiLanguageNames))
         value.uiLanguage = 0;
     if (GameLanguageIds[GameLanguageIndex(value.gameLanguage)] != value.gameLanguage)
         value.gameLanguage = 1;
@@ -244,6 +244,8 @@ Config Read()
             value.bloom = number == 1;
         else if (key == "motion_blur" && number <= 1)
             value.motionBlur = number == 1;
+        else if (key == "scene_fades" && number <= 1)
+            value.sceneFades = number == 1;
         else if (key == "dynamic_shadows" && number <= 2)
             value.dynamicShadows = number;
         else if (key == "culling")
@@ -491,6 +493,7 @@ static bool WriteConfig(const Config &value)
            << "\ndepth_of_field=" << value.depthOfFieldPercent
            << "\nbloom=" << (value.bloom ? 1 : 0)
            << "\nmotion_blur=" << (value.motionBlur ? 1 : 0)
+           << "\nscene_fades=" << (value.sceneFades ? 1 : 0)
            << "\ndynamic_shadows=" << value.dynamicShadows
            << "\nculling=" << value.cullingPercent
            << "\nvibration=" << value.vibrationPercent

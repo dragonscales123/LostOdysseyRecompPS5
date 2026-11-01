@@ -373,7 +373,7 @@ bool SetConsent(bool enabled)
 const wchar_t* Label(uint32_t language)
 {
     static constexpr const wchar_t* text[] = {L"Log collection", L"日誌收集", L"ログ収集", L"로그 수집", L"日志收集"};
-    return text[std::min(language, 4u)];
+    return text[language < std::size(text) ? language : 0];
 }
 
 const wchar_t* Message(uint32_t language)
@@ -399,7 +399,7 @@ const wchar_t* Message(uint32_t language)
         L"版本、Windows 版本、GPU 与驱动、地图名称、错误、崩溃与卡死报告，以及含着色器 ID 的 TAA／抖动不匹配记录。"
         L"文件夹路径中的账户名会被替换，其他文件夹名可能保留。不含存档、截图、个人或设备标识。"
         L"服务器记录 30 天后删除；私有研发归档会保留副本。可随时在设置中关闭。启用日志收集？"};
-    return text[std::min(language, 4u)];
+    return text[language < std::size(text) ? language : 0];
 }
 
 void PromptFirstRun(uint32_t language)
