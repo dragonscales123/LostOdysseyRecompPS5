@@ -1,5 +1,7 @@
 #include <stdafx.h>
 #include "cheats.h"
+#include <os/platform.h>
+#include <cerrno>
 #include <os/logger.h>
 #include "fast_forward.h"
 #include "menu_overlay.h"
@@ -83,11 +85,39 @@ void Tick(PPCContext& ctx, uint8_t* base) {
             // CT LO_BASE = Gold address - 0x44 = returned PlayData + 8.
             if (AllocationContains(playData, data::DataSize+8)) {
                 context = {playData+8, world, level};
-                memory.bytes = {base+context.root, data::DataSize};
+                // Up to the end of the held-item list when the allocation holds it.
+                memory.bytes = {base+context.root, AllocationContains(context.root, ItemListEnd) ? ItemListEnd : data::DataSize};
             }
         }
     }
     session.Tick(context, memory, field);
+    // Item counts: log each change in the play data's item area, with the
+    // cheat table's name where it has one, so a slot can be matched to the
+    // item the game shows (or does not).
+    if (context.root && memory.bytes.size() >= data::DataSize && ValidateParty(memory)) {
+        constexpr uint32_t first = 0x26E00, slots = 0x60;
+        static std::array<uint32_t, slots> last{};
+        static uint32_t lastRoot = 0;
+        const bool fresh = lastRoot != context.root;
+        lastRoot = context.root;
+        std::string changes;
+        for (uint32_t i = 0; i < slots; ++i) {
+            const uint32_t offset = first + i * 4, raw = memory.U32(offset);
+            if (!fresh && raw == last[i]) continue;
+            const uint32_t before = last[i];
+            last[i] = raw;
+            if (fresh && raw == 0) continue;
+            const wchar_t* name = nullptr;
+            for (const auto& e : data::Items) if (e.value == offset) name = e.name;
+            std::string label;
+            if (name) for (const wchar_t* c = name; *c; ++c) label += char(*c < 128 ? *c : '?');
+            changes += fresh
+                ? fmt::format(" {:#x}{}{}={:#010x}({})", offset, name ? ":" : "", label, raw, std::bit_cast<float>(raw))
+                : fmt::format(" {:#x}{}{} {:#010x}({})->{:#010x}({})", offset, name ? ":" : "", label,
+                    before, std::bit_cast<float>(before), raw, std::bit_cast<float>(raw));
+        }
+        if (!changes.empty()) LOG_INFO("items {}:{}", fresh ? "now" : "changed", changes);
+    }
     {
         static uint32_t reported = 0;
         const auto heal = session.LastSaveHeal();

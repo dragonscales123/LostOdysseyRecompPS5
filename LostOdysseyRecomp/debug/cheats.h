@@ -96,6 +96,54 @@ struct Write { uint32_t offset = 0, value = 0; unsigned bytes = 4; };
 inline bool CatalogValue(std::span<const data::Entry> list, uint32_t v) {
     return std::any_of(list.begin(), list.end(), [v](const auto& e) { return e.value == v; });
 }
+// The game's list of held items, which the item menu and the sell screen show
+// (a shop's buy screen reads the counts): item ids, in the game's order, ended
+// by a zero. An item's count is at ItemCounts + id*4. Found by comparing play
+// data around purchases and sales. Writing a count alone leaves the list as it
+// is, so a cheat-given item the list lacks is held but never shown.
+inline constexpr uint32_t ItemCounts = 0x26740, ItemIdLimit = 0x400,
+    ItemList = 0x27740, ItemListSlots = 1024, ItemListEnd = ItemList + ItemListSlots*4;
+// Bring the list in line with the counts these writes leave: add each catalog
+// item or material held but missing from the list, and take out each written
+// one left at zero. Needs the play data span to reach the list.
+inline void SyncItemList(Memory m, std::vector<Write>& writes) {
+    if (m.bytes.size() < ItemListEnd) return;
+    auto count = [&](uint32_t offset) {
+        float value = m.F32(offset);
+        for (const auto& w : writes) if (w.offset == offset && w.bytes == 4) value = std::bit_cast<float>(w.value);
+        return value;
+    };
+    std::vector<uint32_t> list;
+    for (uint32_t i = 0; i < ItemListSlots; ++i) {
+        const uint32_t id = m.U32(ItemList + i*4);
+        if (!id) break;
+        if (id >= ItemIdLimit) return; // not the layout found: leave it alone
+        list.push_back(id);
+    }
+    const size_t before = list.size();
+    std::vector<uint32_t> old = list;
+    auto consider = [&](uint32_t offset) {
+        if (offset < ItemCounts || (offset - ItemCounts) % 4) return;
+        const uint32_t id = (offset - ItemCounts) / 4;
+        if (!id || id >= ItemIdLimit) return;
+        const bool held = count(offset) >= 1;
+        const auto it = std::find(list.begin(), list.end(), id);
+        if (held && it == list.end() && list.size() + 1 < ItemListSlots) list.push_back(id);
+        if (!held && it != list.end()) {
+            const bool written = std::any_of(writes.begin(), writes.end(), [&](const Write& w) { return w.offset == offset; });
+            if (written) list.erase(it);
+        }
+    };
+    for (const auto& e : data::Items) consider(e.value);
+    for (const auto& e : data::Materials) consider(e.value);
+    if (list == old) return;
+    const size_t slots = std::max(before, list.size()) + 1;
+    for (size_t i = 0; i < slots && i < ItemListSlots; ++i) {
+        const uint32_t value = i < list.size() ? list[i] : 0;
+        const uint32_t current = i < old.size() ? old[i] : 0;
+        if (value != current) writes.push_back({uint32_t(ItemList + i*4), value, 4});
+    }
+}
 // Build the whole transaction first. An invalid member aborts without any write.
 inline std::optional<std::vector<Write>> Plan(Memory m, const Request& r) {
     if (!Validate(m)) return {};
@@ -173,6 +221,9 @@ inline std::optional<std::vector<Write>> Plan(Memory m, const Request& r) {
         writes.push_back({0x53, r.value, 1}); break;
     default: return {};
     }
+    if (r.action == Action::Item || r.action == Action::Material ||
+        r.action == Action::AllItems || r.action == Action::AllMaterials)
+        SyncItemList(m, writes);
     for (const auto& w : writes)
         if ((w.bytes != 1 && w.bytes != 2 && w.bytes != 4) ||
             w.offset > m.bytes.size() || w.bytes > m.bytes.size()-w.offset) return {};

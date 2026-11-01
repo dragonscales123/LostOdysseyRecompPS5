@@ -15,7 +15,7 @@ inline constexpr Entry Items[] = {
     {0x26F0C, L"!!!Slot Seeds!!!"},
     {0x26E40, L"Healing Medicine"},
     {0x26E44, L"Healing Herb"},
-    {0x26E48, L"Healing Herb"},
+    {0x26E48, L"Healing Tank"},
     {0x26E4C, L"Heal Full"},
     {0x26E50, L"Mana Herb"},
     {0x26E54, L"Mana Capsule"},
