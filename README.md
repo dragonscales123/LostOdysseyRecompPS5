@@ -70,9 +70,14 @@ You don't need to compile anything. The only things you add yourself are the sha
 
 1. **Copy the title.** Unzip `LostOdyssey-PS5.zip` and copy its `PPSA99212` folder to `/data/homebrew/PPSA99212/` on the PS5.
 2. **Make the shaders.** Unzip the shader cache builder on your PC and run it on your disc folder (Windows: double-click `Build PS5 shader cache.bat`; its `README.txt` has the details). It downloads the game's shader pack from the upstream project and builds the rest from your discs, in 30-90 minutes. Copy the `cache` and `shaders` folders it makes into `/data/homebrew/PPSA99212/`.
-3. **Copy your discs.** Copy your extracted `disc1` to `disc4` folders into `/data/homebrew/PPSA99212/game/` over FTP. Don't use the in-game importer: the console writes slowly from inside a title.
-4. It should look like this:
-5. ```
+3. **Copy your discs.** Copy your extracted `disc1` to `disc4` folders into `/data/homebrew/PPSA99212/game/` over FTP ([folder layout](#folder-layout) below). Don't use the in-game importer: the console writes slowly from inside a title.
+4. **Play.** Launch **Lost Odyssey** from the home screen.
+
+### Folder layout
+
+When everything is copied, the title folder should look like this:
+
+```
 /data/homebrew/PPSA99212/              ← the title folder (copy it here from the release zip)
 ├── eboot.bin                          ← from the release zip
 ├── ps5-env.txt                        ← from the release zip (optional switches)
@@ -119,7 +124,6 @@ You don't need to compile anything. The only things you add yourself are the sha
 - An extra folder level, like `game/disc1/Lost Odyssey Disc 1/default.xex`. The disc's files go straight into `disc1/`.
 - `default.xex` directly in `game/` instead of `game/disc1/`.
 - Discs copied into a different `PPSA99212` folder from the one you launch.
-6. **Play.** Launch **Lost Odyssey** from the home screen.
 
 **Tips**
 
