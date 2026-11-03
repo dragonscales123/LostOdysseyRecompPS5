@@ -20,13 +20,13 @@ You need your own copy of the game. This repository contains no game data, no sh
 
 ## Status
 
-**Beta** (build 47, [v0.2.0-beta.3](https://github.com/dragonscales123/LostOdysseyRecompPS5/releases/latest)), based on LostOdysseyRecomp **v1.1.0**. The port has moved from alpha to beta: everything needed to play is in place, and every crash and freeze found so far is fixed. What is left is testing on more consoles and the later discs, so bug reports are the most useful help right now ([how to report](#reporting-a-bug)).
+**Beta** (build 50, [v0.2.0-beta.5](https://github.com/dragonscales123/LostOdysseyRecompPS5/releases/latest)), based on LostOdysseyRecomp **v1.1.0**. The port has moved from alpha to beta: everything needed to play is in place, and every crash and freeze found so far is fixed. What is left is testing on more consoles and the later discs, so bug reports are the most useful help right now ([how to report](#reporting-a-bug)).
 
 Tested on one console (firmware 13.60) with the USA/Europe four-disc set.
 
 | Area | State |
 | :--- | :--- |
-| Boot, menus, movies | Working |
+| Boot, menus, movies | Working; the game reaches its first frame in about 3 seconds |
 | Field and battles | Working, rendered fully |
 | Saves | Saving and overwriting work |
 | Disc changes | Disc 1 to disc 2 works, in play and when loading a disc 2 save |
@@ -39,7 +39,14 @@ Tested on one console (firmware 13.60) with the USA/Europe four-disc set.
 | Known issues | A few seconds at about 70-80 FPS at the start of a battle |
 | Untested | Discs 3 and 4 |
 
-### Latest: build 47
+### Latest: build 50
+
+- **Starts in about 3 seconds instead of 22.** Opening the 1.8 GB shader store used to read every record one at a time, about 19 seconds before the first frame. The game now keeps a small index next to the store (`shaders_spirv.lostore.index`) and reads that instead. The first launch after copying new shaders builds the index, so it still takes the old time once; every launch after that is fast. If the shader store changes, the index is rebuilt automatically.
+- **A clear message instead of a crash when the discs aren't found** (build 48, [issue #1](https://github.com/dragonscales123/LostOdysseyRecompPS5/issues/1)). Without `game/disc1/default.xex` the game used to crash with an "eboot.bin error". It now shows a PS5 notification and closes, and the log names the path it expected and lists what is in `game/`.
+- **"Prepare shaders again" is hidden** from the System menu on PS5: the shaders come prebuilt from the shader cache builder on your PC.
+- **Startup timing in the log:** any startup step that takes over 100 ms is logged, to help with slow-start reports.
+
+### Build 47
 
 - **Updated to LostOdysseyRecomp v1.1.0:** the settings menu gets the original game's look, game-style button icons with more icon sets, HD and European fonts, four more European languages and a Scene fades option. The renderer gets Vulkan stability fixes and resets occlusion on each map load.
 - **Cheat items now show up properly.** The item menu and the sell screen list only the items on the game's held-item list, which the item cheats never updated, so a cheat-given item could be counted but not shown. Item cheats now keep that list in step. If an item went missing this way, set its quantity again from the cheat menu.
@@ -92,7 +99,8 @@ When everything is copied, the title folder should look like this:
 │   └── portable_vk.lospv
 ├── cache/                             ← made by the shader cache builder
 │   └── shaders/
-│       └── shaders_spirv.lostore
+│       ├── shaders_spirv.lostore
+│       └── shaders_spirv.lostore.index  ← created by the game on first launch
 │
 ├── game/                              ← your own discs (all names lowercase)
 │   ├── disc1/
@@ -119,7 +127,7 @@ When everything is copied, the title folder should look like this:
 └── boot.txt                           ← created by the game; attach it if the game crashed
 ```
 
-**Common mistakes**
+**Common mistakes** (if the game shows "Lost Odyssey: no game data found" and closes, check these, then look in the newest log for the path it expected)
 - `Disc1/` or `Default.xex`: names must be lowercase; the PS5 treats them as different.
 - An extra folder level, like `game/disc1/Lost Odyssey Disc 1/default.xex`. The disc's files go straight into `disc1/`.
 - `default.xex` directly in `game/` instead of `game/disc1/`.
