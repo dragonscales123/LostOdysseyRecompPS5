@@ -1,6 +1,7 @@
 #pragma once
 
 #include "binary_cache.h"
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -83,7 +84,10 @@ public:
                 if (!writable_) throw std::runtime_error("empty shader store is locked by another process");
                 WriteHeader();
             } else ReadHeader();
-            Scan();
+            // Finding every record means one seek and read per record: about
+            // 19 s for a 1.8 GB store on a PS5. A sidecar index written after
+            // a scan stands in while the store keeps its size.
+            if (!LoadIndexLocked()) { Scan(); SaveIndexLocked(); }
             return true;
         } catch (const std::exception& e) {
             if (error) *error = e.what();
@@ -182,7 +186,11 @@ public:
 #endif
     }
 
-    void Close() { std::lock_guard lock(mutex_); CloseLocked(); }
+    void Close() {
+        std::lock_guard lock(mutex_);
+        if (file_ && end_ != indexedSize_) SaveIndexLocked();
+        CloseLocked();
+    }
 
 private:
     using Key = std::tuple<bool, uint64_t, InputDigest>;
@@ -328,6 +336,84 @@ private:
             }
         }
     }
+    // <store>.index: "LOSTIDX1", version, format, the store's size when written,
+    // the record count, then per record its key, offset, size and checksum.
+    static constexpr char IndexMagic[9] = "LOSTIDX1";
+    static constexpr uint32_t IndexVersion = 1;
+    static constexpr size_t IndexHeaderBytes = 32, IndexRecordBytes = 61;
+    std::filesystem::path IndexPath() const { return std::filesystem::path(path_.native() + std::filesystem::path(".index").native()); }
+    bool LoadIndexLocked() {
+        const uint64_t size = FileSize();
+        FILE* in = OpenFile(IndexPath(), "rb", false);
+        if (!in) return false;
+        struct Closer { FILE* f; ~Closer() { std::fclose(f); } } closer{in};
+        std::array<uint8_t, IndexHeaderBytes> h{};
+        if (std::fread(h.data(), 1, h.size(), in) != h.size() || std::memcmp(h.data(), IndexMagic, 8) ||
+            Get32(h.data() + 8) != IndexVersion || Get32(h.data() + 12) != static_cast<uint32_t>(format_) ||
+            Get64(h.data() + 16) != size)
+            return false;
+        const uint64_t count = Get64(h.data() + 24);
+        if (count > (size / RecordHeaderBytes)) return false;
+        std::vector<uint8_t> bytes(size_t(count) * IndexRecordBytes);
+        if (std::fread(bytes.data(), 1, bytes.size(), in) != bytes.size()) return false;
+        std::map<Key, Entry> index;
+        uint64_t last = 0;
+        for (uint64_t i = 0; i < count; ++i) {
+            const uint8_t* r = bytes.data() + i * IndexRecordBytes;
+            Key key{r[0] == 1, Get64(r + 1), {}};
+            std::memcpy(std::get<2>(key).data(), r + 9, 32);
+            const Entry entry{Get64(r + 41), Get32(r + 49), Get64(r + 53)};
+            if (entry.offset < HeaderBytes + RecordHeaderBytes || !entry.size || entry.offset + entry.size > size) return false;
+            last = std::max(last, entry.offset + entry.size);
+            index[key] = entry;
+        }
+        // The records must reach the end of the store, and the last one must
+        // still start with its marker.
+        if (count ? last != size : size != HeaderBytes) return false;
+        if (count) {
+            const auto& tail = std::max_element(index.begin(), index.end(),
+                [](const auto& a, const auto& b) { return a.second.offset < b.second.offset; })->second;
+            std::array<uint8_t, RecordHeaderBytes> rh{};
+            if (!Seek(tail.offset - RecordHeaderBytes) || std::fread(rh.data(), 1, rh.size(), file_) != rh.size() ||
+                Get32(rh.data()) != RecordMarker || Get32(rh.data() + 48) != tail.size)
+                return false;
+        }
+        index_ = std::move(index);
+        end_ = size;
+        indexedSize_ = size;
+        return true;
+    }
+    void SaveIndexLocked() {
+        if (end_ != FileSize()) return; // a torn tail the read-only open could not trim
+        const auto path = IndexPath();
+        const auto temp = std::filesystem::path(path.native() + std::filesystem::path(".tmp").native());
+        FILE* out = OpenFile(temp, "wb", false);
+        if (!out) return;
+        std::array<uint8_t, IndexHeaderBytes> h{};
+        std::memcpy(h.data(), IndexMagic, 8);
+        Put32(h.data() + 8, IndexVersion);
+        Put32(h.data() + 12, static_cast<uint32_t>(format_));
+        Put64(h.data() + 16, end_);
+        Put64(h.data() + 24, index_.size());
+        std::vector<uint8_t> bytes(index_.size() * IndexRecordBytes);
+        size_t i = 0;
+        for (const auto& [key, entry] : index_) {
+            uint8_t* r = bytes.data() + i++ * IndexRecordBytes;
+            r[0] = std::get<0>(key) ? 1 : 0;
+            Put64(r + 1, std::get<1>(key));
+            std::memcpy(r + 9, std::get<2>(key).data(), 32);
+            Put64(r + 41, entry.offset);
+            Put32(r + 49, entry.size);
+            Put64(r + 53, entry.checksum);
+        }
+        const bool ok = std::fwrite(h.data(), 1, h.size(), out) == h.size() &&
+            std::fwrite(bytes.data(), 1, bytes.size(), out) == bytes.size() && std::fflush(out) == 0;
+        std::fclose(out);
+        std::error_code ec;
+        if (ok) std::filesystem::rename(temp, path, ec);
+        if (!ok || ec) { std::filesystem::remove(temp, ec); return; }
+        indexedSize_ = end_;
+    }
     void CloseLocked(bool clearIndex = true) {
         if (file_) { std::fclose(file_); file_ = nullptr; }
         writable_ = false;
@@ -341,7 +427,7 @@ private:
     bool writable_ = false;
     std::map<Key, Entry> index_;
     std::set<Key> used_;
-    uint64_t end_ = 0, recovered_ = 0;
+    uint64_t end_ = 0, recovered_ = 0, indexedSize_ = 0;
 };
 
 // Per-shader cache files from before the store (cache::FileName), any

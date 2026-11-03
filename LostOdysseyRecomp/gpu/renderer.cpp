@@ -14803,7 +14803,11 @@ void main()
             return true;
         if (getenv("LO_NO_RENDERER"))
             return false;
+        const auto constructStart = std::chrono::steady_clock::now();
         auto r = std::make_unique<Renderer>();
+        if (const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - constructStart).count(); ms >= 100)
+            LOG_INFO("renderer: construction took {} ms", ms);
         if (!r->Init()) return false;
         g_renderer = r.release();
         // The std::_Exit paths close the shader log first; that runs this flush.

@@ -2915,16 +2915,28 @@ namespace gpu::video
             }
             LogOutputPixels("created");
             startupWatch.Step("presentation resources");
+            // Startup timing: each stage that takes a noticeable time is logged.
+            auto stageStart = std::chrono::steady_clock::now();
+            auto stage = [&](const char* name) {
+                const auto now = std::chrono::steady_clock::now();
+                const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - stageStart).count();
+                if (ms >= 100) LOG_INFO("video startup: {} took {} ms", name, ms);
+                stageStart = now;
+            };
             g_uploadCapacity = uint64_t(kMaxWidth) * kMaxHeight * 4;
             g_uploadBuffer = g_device->createBuffer(plume::RenderBufferDesc::UploadBuffer(g_uploadCapacity));
             if (!g_uploadBuffer) return "presentation upload allocation failed";
+            stage("upload buffer");
             g_presentation = std::make_unique<Presentation>();
             if (!g_presentation->Init(g_device.get(), g_swapChain->getFormat(), g_swapChain->hasStorageTextures()))
                 return "presentation shader/pipeline initialization failed";
+            stage("presentation shaders and pipelines");
             g_presentation->PrewarmOverlay();
+            stage("overlay prewarm");
             g_presentationFormat = g_swapChain->getFormat();
             startupWatch.Step("renderer initialization");
             if (!getenv("LO_NO_RENDERER") && !renderer::Init()) return "renderer initialization failed";
+            stage("renderer");
             UpdateHdrOutput(true);
             return {};
         }, ResetGpu);
