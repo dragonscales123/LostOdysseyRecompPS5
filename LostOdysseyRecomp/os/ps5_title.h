@@ -25,6 +25,9 @@ void InitializeTitle();
 // written through and closed each time, so it survives a crash) and to klog.
 // Safe before main and before the runtime's log exists.
 void Breadcrumb(const char* line);
+// A notification on the PS5's screen (the shell's toast), for errors a player
+// must see before the title closes.
+void Notify(const char* text);
 
 // LO_PS5_VIDEO_PROBE=1: what the display output accepts for HDR, logged to
 // boot.txt, with test patterns on screen (os/ps5_video_probe.cpp). The title

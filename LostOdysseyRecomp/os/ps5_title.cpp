@@ -35,9 +35,22 @@ extern "C" int mspace_mallopt(int parameter, int value);
 extern "C" int32_t scePthreadGetaffinity(pthread_t thread, uint64_t* mask);
 extern "C" int32_t scePthreadSetaffinity(pthread_t thread, uint64_t mask);
 
+// libkernel's notification request (the shell's toast); the layout every PS5
+// payload uses: 45 reserved bytes, then the text.
+struct NotifyRequest { char reserved[45]; char message[3075]; };
+static_assert(sizeof(NotifyRequest) == 0xC30);
+extern "C" int sceKernelSendNotificationRequest(int device, NotifyRequest* request, size_t size, int blocking);
+
 namespace os::ps5
 {
 [[noreturn]] static void ExitTitle(int status);
+
+void Notify(const char* text)
+{
+    NotifyRequest request{};
+    std::snprintf(request.message, sizeof(request.message), "%s", text);
+    (void)sceKernelSendNotificationRequest(0, &request, sizeof(request), 0);
+}
 
 void Breadcrumb(const char* line)
 {

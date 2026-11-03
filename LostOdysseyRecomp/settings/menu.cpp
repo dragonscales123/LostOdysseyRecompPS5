@@ -1177,8 +1177,11 @@ bool SystemRowHidden(int r)
 #if LO_PLATFORM_PS5
     // No network on the console (updates, shader bundle download, log upload);
     // the importer's writes slow to 2 MiB/s after 1.3 GiB, so discs go in by FTP.
+    // Shaders come prebuilt from the PC shader cache builder: the console has no
+    // DXC, so "Prepare shaders again" has nothing to prepare.
     return r == SystemDiscordStatusRow || r == SystemAddToSteamRow || r == SystemUpdatesRow ||
-           r == SystemCollectionRow || r == SystemImportRow || r == SystemShaderBundleRow;
+           r == SystemCollectionRow || r == SystemImportRow || r == SystemShaderBundleRow ||
+           r == SystemShaderPreparationRow;
 #elif LO_PLATFORM_ANDROID || defined(__SWITCH__) || defined(__NX__) || !(defined(_WIN32) || defined(__linux__) || defined(__APPLE__))
     return r == SystemDiscordStatusRow || r == SystemAddToSteamRow;
 #else

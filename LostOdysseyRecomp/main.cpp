@@ -624,6 +624,27 @@ int main(int argc, char* argv[])
                     gameResolution.configuredPathRejected ? std::string("named by game-path.txt")
                                                           : "searched beside " + FileSystem::PathUtf8(executableDirectory),
                     notice.empty() ? "" : ": ", notice);
+#if LO_PLATFORM_PS5
+        // The importer needs a working directory and a file browser the title
+        // does not have: say where the discs go, show what is there, and close.
+        {
+            std::string found;
+            std::error_code error;
+            for (auto it = std::filesystem::recursive_directory_iterator(gameRoot, error);
+                 !error && it != std::filesystem::recursive_directory_iterator() && found.size() < 1500; it.increment(error))
+            {
+                if (it.depth() > 1) { it.disable_recursion_pending(); continue; }
+                found += " " + FileSystem::PathUtf8(it->path().lexically_relative(gameRoot)) + (it->is_directory(error) ? "/" : "");
+            }
+            LOG_ERROR("no game data: the title needs {} (lowercase name, the disc's own files, no extra folder); "
+                      "found in {}:{}", FileSystem::PathUtf8(gameRoot / "disc1" / "default.xex"),
+                      FileSystem::PathUtf8(gameRoot), found.empty() ? " nothing" : found);
+            os::ps5::Breadcrumb("main: no game data in game/disc1, closing (see the runtime log)");
+            os::ps5::Notify("Lost Odyssey: no game data found.\nCopy your Disc 1 files into the title's game/disc1 folder "
+                            "(game/disc1/default.xex, LO.fpi and the .fpd files), then start the game again.");
+            return 1;
+        }
+#endif
         if (getenv("LO_HEADLESS") || getenv("LO_BACKGROUND"))
         {
             LOG_ERROR("missing default.xex in game root: headless or background environment prevents opening installer UI");
